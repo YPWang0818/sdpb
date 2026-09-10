@@ -28,6 +28,9 @@ struct Environment
   // at the next iteration with SDP_Solver_Terminate_Reason::SIGTERM_Received.
   // Useful for host applications embedding SDPB.
   static void request_termination();
+  // Forget a termination request (or a received SIGTERM), so that a
+  // subsequent SDP_Solver::run() proceeds normally.
+  static void clear_termination_request();
 
 private:
   El::Environment env;

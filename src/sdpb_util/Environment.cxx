@@ -56,6 +56,10 @@ void Environment::request_termination()
 {
   sigterm_flag = true;
 }
+void Environment::clear_termination_request()
+{
+  sigterm_flag = false;
+}
 
 void Environment::initialize()
 {

@@ -12,5 +12,7 @@ TEST_CASE("environment")
     REQUIRE(!env.sigterm_received());
     Environment::request_termination();
     REQUIRE(env.sigterm_received());
+    Environment::clear_termination_request();
+    REQUIRE(!env.sigterm_received());
   }
 }
