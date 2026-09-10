@@ -73,6 +73,9 @@ public:
   El::BigFloat dual_error; // maxAbs(dualResidues)
   El::BigFloat R_error;    // maxAbs(R = mu * I - XY)
 
+  // Number of iterations performed by the last run()
+  size_t num_iterations = 0;
+
   int64_t current_generation;
   boost::optional<int64_t> backup_generation;
 

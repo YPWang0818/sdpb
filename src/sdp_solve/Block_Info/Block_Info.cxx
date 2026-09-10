@@ -31,13 +31,15 @@ Block_Info::Block_Info(const Environment &env, const fs::path &sdp_path,
 
 Block_Info::Block_Info(const Environment &env,
                        const std::vector<size_t> &matrix_dimensions,
+                       const std::vector<size_t> &matrix_num_points,
                        const size_t &proc_granularity,
                        const Verbosity &verbosity)
     // TODO: This does not set the filename, file_block_indices, or
     // file_num_procs, since those are only useful when reading in info
     // from a filesystem.
-    : dimensions(matrix_dimensions), num_points(matrix_dimensions.size(), 1)
+    : dimensions(matrix_dimensions), num_points(matrix_num_points)
 {
+  ASSERT_EQUAL(dimensions.size(), num_points.size());
   std::vector<Block_Cost> block_costs;
   auto schur_sizes(schur_block_sizes());
   for(size_t block = 0; block < schur_sizes.size(); ++block)

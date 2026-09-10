@@ -458,6 +458,8 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
             = SDP_Solver_Terminate_Reason::MaxComplementarityExceeded;
           break;
         }
+      // The iteration is complete: count it.
+      num_iterations = iteration;
       Scoped_Timer print_iteration_timer(timers, "print_iteration");
       print_iteration(iterations_json_path, iteration, mu, primal_step_length,
                       dual_step_length, beta_corrector, *this,

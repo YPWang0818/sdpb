@@ -33,9 +33,20 @@ public:
   Block_Info(const Environment &env, const std::filesystem::path &sdp_path,
              const El::Matrix<int32_t> &block_timings,
              const size_t &proc_granularity, const Verbosity &verbosity);
+  // In-memory: dimensions and num_points for every block.
+  // Block costs are estimated from Schur block sizes.
   Block_Info(const Environment &env,
              const std::vector<size_t> &matrix_dimensions,
+             const std::vector<size_t> &matrix_num_points,
              const size_t &proc_granularity, const Verbosity &verbosity);
+  // In-memory: num_points = 1 for every block.
+  Block_Info(const Environment &env,
+             const std::vector<size_t> &matrix_dimensions,
+             const size_t &proc_granularity, const Verbosity &verbosity)
+      : Block_Info(env, matrix_dimensions,
+                   std::vector<size_t>(matrix_dimensions.size(), 1),
+                   proc_granularity, verbosity)
+  {}
   Block_Info(const Environment &env,
              const std::vector<size_t> &matrix_dimensions,
              const Verbosity &verbosity)

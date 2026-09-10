@@ -1,6 +1,8 @@
 #include "assign_bilinear_bases_dist.hxx"
 #include "set_bases_blocks.hxx"
+#include "read_block_data/SDP_Block_Data.hxx"
 #include "sdp_solve/SDP.hxx"
+#include "pmp2sdp/Dual_Constraint_Group.hxx"
 
 #include "sdpb_util/assert.hxx"
 #include "sdpb_util/copy_matrix.hxx"
@@ -148,6 +150,38 @@ SDP::SDP(
 
   // Copy over dual_objective_b
   copy_matrix(dual_objective_b_star, dual_objective_b);
+
+  validate(block_info);
+}
+
+SDP::SDP(const El::BigFloat &objective_const_input,
+         const std::vector<El::BigFloat> &dual_objective_b_input,
+         const std::vector<Dual_Constraint_Group> &groups,
+         const std::optional<std::vector<El::BigFloat>> &normalization_input,
+         const Block_Info &block_info, const El::Grid &grid)
+    : dual_objective_b(dual_objective_b_input.size(), 1, grid),
+      objective_const(objective_const_input),
+      normalization(normalization_input)
+{
+  {
+    El::Matrix<El::BigFloat> b_local(dual_objective_b_input.size(), 1);
+    for(size_t i = 0; i < dual_objective_b_input.size(); ++i)
+      b_local(i, 0) = dual_objective_b_input.at(i);
+    copy_matrix(b_local, dual_objective_b);
+  }
+
+  const size_t num_blocks = block_info.block_indices.size();
+  ASSERT_EQUAL(groups.size(), num_blocks);
+  primal_objective_c.blocks.resize(num_blocks);
+  free_var_matrix.blocks.resize(num_blocks);
+  bilinear_bases.resize(2 * num_blocks);
+  bases_blocks.resize(2 * num_blocks);
+
+  for(size_t index = 0; index < num_blocks; ++index)
+    {
+      const SDP_Block_Data block_data(groups.at(index), index, block_info);
+      set_sdp_from_root(grid, block_info, block_data, *this);
+    }
 
   validate(block_info);
 }

@@ -52,6 +52,10 @@ bool Environment::sigterm_received() const
 {
   return sigterm_flag;
 }
+void Environment::request_termination()
+{
+  sigterm_flag = true;
+}
 
 void Environment::initialize()
 {

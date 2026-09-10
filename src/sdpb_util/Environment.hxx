@@ -24,6 +24,10 @@ struct Environment
   [[nodiscard]] size_t initial_node_mem_used() const;
 
   [[nodiscard]] bool sigterm_received() const;
+  // Behave as if SIGTERM was received: SDP_Solver::run() will stop
+  // at the next iteration with SDP_Solver_Terminate_Reason::SIGTERM_Received.
+  // Useful for host applications embedding SDPB.
+  static void request_termination();
 
 private:
   El::Environment env;

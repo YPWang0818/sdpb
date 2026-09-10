@@ -1,6 +1,7 @@
 #include "SDP_Block_Data.hxx"
 
 #include "Json_Block_Data_Parser.hxx"
+#include "pmp2sdp/Dual_Constraint_Group.hxx"
 #include "sdp_solve/SDP/set_bases_blocks.hxx"
 #include "sdpb_util/Vector_State.hxx"
 #include "sdpb_util/assert.hxx"
@@ -75,6 +76,26 @@ SDP_Block_Data::SDP_Block_Data(std::istream &block_stream,
   bilinear_bases[0] = std::move(parse_result.bilinear_bases_even);
   bilinear_bases[1] = std::move(parse_result.bilinear_bases_odd);
 
+  set_bases_blocks(block_info);
+}
+
+SDP_Block_Data::SDP_Block_Data(const Dual_Constraint_Group &group,
+                               const size_t block_index_local,
+                               const Block_Info &block_info)
+    : block_index_local(block_index_local),
+      constraint_matrix(group.constraint_matrix),
+      primal_objective_c(to_matrix(group.constraint_constants)),
+      bilinear_bases(group.bilinear_bases)
+{
+  const size_t block_index = block_info.block_indices.at(block_index_local);
+  ASSERT_EQUAL(group.block_index, block_index);
+  ASSERT_EQUAL(group.dim, block_info.dimensions.at(block_index));
+  ASSERT_EQUAL(group.num_points, block_info.num_points.at(block_index));
+  set_bases_blocks(block_info);
+}
+
+void SDP_Block_Data::set_bases_blocks(const Block_Info &block_info)
+{
   const size_t block_index = block_info.block_indices.at(block_index_local);
 
   // Set bases_blocks:

@@ -323,6 +323,8 @@ def build(bld):
                         'test/src/unit_tests/cases/copy_matrix.test.cxx',
                         'test/src/unit_tests/cases/json.test.cxx',
                         'test/src/unit_tests/cases/pmp_sampling.test.cxx',
+                        'test/src/unit_tests/cases/sdp_in_memory.test.cxx',
+                        'test/src/unit_tests/cases/environment.test.cxx',
                         'test/src/unit_tests/cases/shared_window.test.cxx'],
                 target='unit_tests',
                 cxxflags=default_flags,

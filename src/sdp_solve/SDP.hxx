@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <optional>
 
+class Dual_Constraint_Group;
+
 // The class SDP encodes a semidefinite program of the following form
 //
 // Dual: maximize f + b.y over y,Y such that
@@ -116,6 +118,15 @@ struct SDP
       const std::vector<El::BigFloat> &normalization,
       const El::BigFloat &primal_c_scale, const Block_Info &block_info,
       const El::Grid &grid);
+  // In-memory, from sampled Dual_Constraint_Groups (e.g. from Output_SDP):
+  // groups.at(i) must describe block block_info.block_indices.at(i),
+  // and objective_const, dual_objective_b and normalization must be
+  // identical on all ranks of block_info.mpi_comm.
+  SDP(const El::BigFloat &objective_const,
+      const std::vector<El::BigFloat> &dual_objective_b,
+      const std::vector<Dual_Constraint_Group> &groups,
+      const std::optional<std::vector<El::BigFloat>> &normalization,
+      const Block_Info &block_info, const El::Grid &grid);
 
 private:
   void validate(const Block_Info &block_info) const noexcept(false);
