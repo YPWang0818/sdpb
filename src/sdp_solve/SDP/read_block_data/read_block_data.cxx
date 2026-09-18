@@ -32,7 +32,9 @@ void set_sdp_from_root(const El::Grid &grid, const Block_Info &block_info,
   int index = sdp_block_local.block_index_local;
   El::mpi::Broadcast(index, 0, comm);
   if(index == -1)
-    RUNTIME_ERROR("block_data file not found for one of the indices");
+    RUNTIME_ERROR("Block data is missing (block_data file not found or "
+                  "in-memory block not initialized) on the root rank of "
+                  "the block's MPI group");
 
   const size_t block_index = block_info.block_indices.at(index);
 
