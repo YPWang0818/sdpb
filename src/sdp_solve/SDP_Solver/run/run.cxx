@@ -192,6 +192,9 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
 {
   SDP_Solver_Terminate_Reason terminate_reason(
     SDP_Solver_Terminate_Reason::MaxIterationsExceeded);
+  // Reset, so that a run() which stops before completing an iteration
+  // does not report the count of a previous run().
+  num_iterations = 0;
   Scoped_Timer solver_timer(timers, "run");
   Scoped_Timer initialize_timer(timers, "initialize");
   if(verbosity >= Verbosity::regular && El::mpi::Rank() == 0)

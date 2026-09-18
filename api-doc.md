@@ -92,7 +92,7 @@ constraints are **not negotiable without patching**:
 | **Node layout** | `Environment` splits `COMM_WORLD` by shared-memory node; `allocate_blocks` asserts every node has the same number of ranks (`Block_Info/allocate_blocks.cxx:14`). | Launch with a uniform ranks-per-node count. |
 | **MPI init/finalize** | `Environment` wraps `El::Environment` (calls `El::Initialize`/`El::Finalize`). In Elemental, `Initialize` only calls `MPI_Init` if MPI isn't initialized yet, and `Finalize` only finalizes what it initialized — check this against the Elemental fork you build with. | Create **one** `Environment` for the process lifetime. Destroy every SDPB object (they hold MPI communicators, e.g. `Block_Info::mpi_comm`) **before** the `Environment`. |
 | **Precision** | `Environment::set_precision(bits)` sets the *global* GMP default precision (`El::gmp::SetPrecision`) and MPFR's `Boost_Float::default_precision`. `El::BigFloat`s keep the precision they were created with. | Call it before creating any `BigFloat` (including `Solver_Parameters` defaults). Binary SDP block files **must** match this precision exactly (`SDP_Block_Data.cxx:41`). Running two precisions in one process means re-calling `set_precision` and rebuilding everything. |
-| **SIGTERM** | `Environment::initialize` installs its own `SIGTERM` handler (`Environment.cxx:62`). `SDP_Solver::run` polls it every iteration and returns `SIGTERM_Received`. `src/sdpb/solve.cxx` then calls `MPI_Finalize(); exit(SIGTERM)` — the library itself does not. | Your SIGTERM handler is replaced. If you need yours, re-install it after constructing `Environment`, and check `env.sigterm_received()` yourself. |
+| **SIGTERM** | `Environment::initialize` installs its own `SIGTERM` handler (`Environment.cxx:62`). `SDP_Solver::run` polls it every iteration and returns `SIGTERM_Received`. `src/sdpb/solve.cxx` then calls `MPI_Finalize(); exit(SIGTERM)` — the library itself does not. | Your SIGTERM handler is replaced. If you need yours, re-install it after constructing `Environment`. To stop a running solve from the host (e.g. another thread), call `Environment::request_termination()`; `run()` returns `SIGTERM_Received` at the next iteration. ⚠️ The flag is sticky: call `Environment::clear_termination_request()` before the next `run()`, or it returns immediately. The flag is a lock-free `std::atomic<bool>`, so both calls are thread- and signal-safe. |
 | **BLAS threading** | `BigInt_Shared_Memory_Syrk_Context` calls `openblas_set_num_threads(1)` when built with `OPENBLAS_THREAD` (`BigInt_Shared_Memory_Syrk_Context.cxx:365-371`). | Global side effect on the host's OpenBLAS. |
 | **Shared memory** | Each `run()` allocates MPI shared-memory windows (`MPI_Win_allocate_shared`), sized by `Solver_Parameters::max_shared_memory_bytes` (0 = ~50% of free RAM). | Budget memory, or set `max_shared_memory_bytes` explicitly. Allocation happens again on every `run()`. |
 | **Errors** | Errors are `std::runtime_error`/`std::logic_error` thrown via `ASSERT`/`RUNTIME_ERROR` (with stack trace in the message). They are usually thrown on *some* ranks only. | Catching an exception and continuing is generally unsafe: other ranks will hang at the next collective. SDPB's own mains do `El::ReportException(e); El::mpi::Abort(COMM_WORLD, 1)`. `Shared_Window_Array`'s destructor deliberately skips `MPI_Win_free` during stack unwinding. |
@@ -204,9 +204,9 @@ write_sdp("/scratch/run1/sdp", out, pmp, Block_File_Format::bin, /*zip*/ false,
 
 ### 3.3 Build a PMP in memory, then solve (no patches needed)
 
-`Polynomial_Matrix_Program` can be constructed directly; the conversion to an SDP goes
-through `write_sdp`, i.e. a directory on disk (use a tmpfs such as `/dev/shm` to make
-this cheap). ⚠️ With several nodes, the directory must be on a filesystem visible to all
+`Polynomial_Matrix_Program` can be constructed directly. This recipe converts it to an SDP
+through `write_sdp`, i.e. a directory on disk; use a tmpfs such as `/dev/shm` to make this
+cheap. §3.5 does the same without any files. ⚠️ With several nodes, the directory must be on a filesystem visible to all
 ranks.
 
 ```cpp
@@ -337,78 +337,84 @@ Notes:
 - A warm start is possible: write into `solver.y.blocks[i]` (every local copy) and
   `solver.X` / `solver.Y` before calling `run()`.
 
-### 3.5 Fully in-memory SDP (requires a small patch)
+### 3.5 PMP → SDP fully in memory (no files)
 
-There is no public route from a `Polynomial_Matrix_Program` to an `SDP` without files:
+The `python-api` branch adds the pieces that make this possible without a disk round trip:
 
-- `SDP` has no default constructor; its only in-memory constructor
-  (`SDP(objective_const, primal_objective_c_input, …)`, §8.4) hard-codes trivial bilinear
-  bases, so it only works for blocks with `num_points == 1` (it is the `outer_limits` path).
-- `Block_Info`'s in-memory constructor sets `num_points = 1` for every block.
-- The code that scatters parsed block data into an `SDP` (`set_sdp_from_root`,
-  `SDP/read_block_data/read_block_data.cxx:26`) is in an anonymous namespace.
+- `Block_Info(env, dimensions, num_points, proc_granularity, verbosity)` — an in-memory
+  block mapping with the real number of sample points per block (§8.1).
+- `SDP(objective_const, dual_objective_b, groups, normalization, block_info, grid)` — an
+  `SDP` built from sampled `Dual_Constraint_Group`s (§8.4). The result is bit-for-bit
+  identical to writing with `write_sdp` and reading back; the unit test
+  `test/src/unit_tests/cases/sdp_in_memory.test.cxx` checks exactly that.
 
-If a disk round trip is unacceptable, add two constructors to your fork. The sketch below
-is **not in the repository** and is untested. It reuses only public pieces:
-`Dual_Constraint_Group` (§7.2) has exactly the data layout of `block_data_*.bin`, and
-`set_bilinear_bases_block_local` / `copy_matrix` are public.
+The order matters: the block mapping decides which blocks each rank owns, and the `SDP`
+constructor needs the groups for exactly those blocks, in that order.
 
 ```cpp
-// Block_Info: in-memory mapping with correct num_points (patch)
-Block_Info::Block_Info(const Environment &env, const std::vector<size_t> &dims,
-                       const std::vector<size_t> &num_points_,
-                       const Verbosity &verbosity)
-    : dimensions(dims), num_points(num_points_)
-{
-  std::vector<Block_Cost> costs;
-  for(size_t b = 0; b < dims.size(); ++b)
-    costs.emplace_back(get_schur_block_size(b) * get_schur_block_size(b), b);
-  allocate_blocks(env, costs, 1, verbosity);
-}
+#include "pmp/Polynomial_Matrix_Program.hxx"
+#include "pmp2sdp/Output_SDP/Output_SDP.hxx"
+#include "sdp_solve/sdp_solve.hxx"
 
-// SDP: from Dual_Constraint_Groups for exactly block_info.block_indices, in that order,
-// available identically on every rank of the group (patch)
-SDP::SDP(const El::BigFloat &f, const std::vector<El::BigFloat> &b,
-         const std::vector<Dual_Constraint_Group> &groups,
-         const Block_Info &block_info, const El::Grid &grid)
-    : dual_objective_b(b.size(), 1, grid), objective_const(f)
-{
-  El::Matrix<El::BigFloat> b_local(b.size(), 1);
-  for(size_t i = 0; i < b.size(); ++i) b_local(i, 0) = b[i];
-  copy_matrix(b_local, dual_objective_b);
-  for(size_t i = 0; i < groups.size(); ++i)
-    {
-      const auto &g = groups[i];
-      const size_t block_index = block_info.block_indices.at(i);
-      El::Matrix<El::BigFloat> c(g.constraint_constants.size(), 1);
-      for(size_t k = 0; k < g.constraint_constants.size(); ++k) c(k, 0) = g.constraint_constants[k];
-      primal_objective_c.blocks.emplace_back(c.Height(), 1, grid);
-      copy_matrix(c, primal_objective_c.blocks.back());
-      free_var_matrix.blocks.emplace_back(g.constraint_matrix.Height(), b.size(), grid);
-      copy_matrix(g.constraint_matrix, free_var_matrix.blocks.back());
-      for(size_t parity : {0, 1})
-        {
-          bilinear_bases.emplace_back(grid);
-          bilinear_bases.back().Resize(g.bilinear_bases[parity].Height(),
-                                       g.bilinear_bases[parity].Width());
-          copy_matrix(g.bilinear_bases[parity], bilinear_bases.back());
-          El::Matrix<El::BigFloat> bases_block_local(
-            block_info.get_psd_matrix_block_size(block_index, parity),
-            block_info.get_bilinear_pairing_block_size(block_index, parity));
-          set_bilinear_bases_block_local(g.bilinear_bases[parity], bases_block_local);
-          bases_blocks.emplace_back(bases_block_local.Height(), bases_block_local.Width(), grid);
-          copy_matrix(bases_block_local, bases_blocks.back());
-        }
-    }
-  validate(block_info);
-}
+// Inputs, identical on every rank:
+//   objective (a_0..a_N), normalization (std::optional, n_0..n_N), num_blocks,
+//   make_pvm(j): builds the Polynomial_Vector_Matrix of global block j (§3.3)
+
+// 1. Global block sizes. dim = polynomials.Height(), num_points = sample_points.size();
+//    either compute them analytically or build every block once and read them off.
+std::vector<size_t> dimensions(num_blocks), num_points(num_blocks);
+for(size_t j = 0; j < num_blocks; ++j)
+  {
+    const Polynomial_Vector_Matrix pvm = make_pvm(j);
+    dimensions[j] = pvm.polynomials.Height();
+    num_points[j] = pvm.sample_points.size();
+  }
+
+// 2. Block mapping (collective)
+Block_Info block_info(env, dimensions, num_points, /*proc_granularity*/ 1, verbosity);
+El::Grid grid(block_info.mpi_comm.value);
+
+// 3. A PMP holding exactly this rank's blocks, in block_info.block_indices order
+std::vector<Polynomial_Vector_Matrix> matrices;
+std::vector<size_t> local_to_global;
+std::vector<std::filesystem::path> block_paths;
+for(const size_t j : block_info.block_indices)
+  {
+    matrices.push_back(make_pvm(j));
+    local_to_global.push_back(j);
+    block_paths.emplace_back("in-memory/block_" + std::to_string(j)); // label, non-empty
+  }
+const Polynomial_Matrix_Program pmp(objective, normalization, num_blocks,
+                                    std::move(matrices), std::move(local_to_global),
+                                    std::move(block_paths));
+
+// 4. Eliminate the normalization and sample (rank-local), then build the SDP (collective)
+Timers timers(env, verbosity);
+const Output_SDP out(pmp, {"my_app"}, timers);
+const SDP sdp(out.objective_const, out.dual_objective_b, out.dual_constraint_groups,
+              out.normalization, block_info, grid);
+
+// 5. Solve as in §3.1
+SDP_Solver solver(params, verbosity, false, block_info, grid, sdp.dual_objective_b.Height());
 ```
 
-Workflow with the patch: build each `Polynomial_Vector_Matrix` to learn
-`dim = polynomials.Height()` and `num_points = sample_points.size()` for every block →
-patched `Block_Info` → on each rank build the `Dual_Constraint_Group`s for
-`block_info.block_indices` (apply the normalization first; see `Output_SDP`, §7.3) →
-patched `SDP` → `SDP_Solver` / `run` as in §3.1.
+Notes:
+- **Every rank of a block's MPI group must pass that block's group**, with matching `dim`
+  and `num_points` (asserted on every rank), although only the group root's data is
+  actually copied into the distributed matrices. With several ranks per block this means a
+  redundant copy of the sampled block on each of them. Ranks in the same group have the
+  same `block_indices`, so the loop in step 3 does the right thing.
+- `out.normalization` is stored on every rank here (the file-based constructor only sets it
+  on rank 0); it is only used to reconstruct `z` from `y` (§3.7).
+- Block costs for the mapping are estimated as `schur_block_size²`. For a long-running
+  family of solves you can measure `block_timings_ms` with a 2-iteration `run()`, but there
+  is no in-memory `Block_Info` constructor taking timings (and no default constructor). The
+  only route is `block_info.allocate_blocks(env, costs, 1, verbosity)` on an existing
+  object, which overwrites its MPI group/communicator without freeing the old ones (§8.1);
+  everything built on the old mapping (`grid`, `sdp`, `solver`) must be rebuilt afterwards.
+- If you already have sampled data (`B`, `c`, sampled bilinear bases) from elsewhere, fill
+  `Dual_Constraint_Group`s by hand (§7.2) and skip steps 3–4. `B` must then already have
+  the normalization eliminated.
 
 ### 3.6 Default `Solver_Parameters`
 
@@ -474,6 +480,8 @@ struct Environment
   [[nodiscard]] int node_index() const;        // 0..num_nodes-1
   [[nodiscard]] size_t initial_node_mem_used() const; // bytes, from /proc/meminfo
   [[nodiscard]] bool sigterm_received() const;
+  static void request_termination();        // as if SIGTERM arrived: run() stops at the next iteration
+  static void clear_termination_request();  // forget a request / received SIGTERM before the next run()
 private:
   El::Environment env; /* ... */
 };
@@ -1211,7 +1219,12 @@ public:
   Block_Info(const Environment &env, const std::filesystem::path &sdp_path,
              const El::Matrix<int32_t> &block_timings,
              const size_t &proc_granularity, const Verbosity &verbosity);
-  // In-memory: num_points = 1 for every block
+  // In-memory: dimensions and num_points for every block; costs = schur_block_size^2
+  Block_Info(const Environment &env,
+             const std::vector<size_t> &matrix_dimensions,
+             const std::vector<size_t> &matrix_num_points,
+             const size_t &proc_granularity, const Verbosity &verbosity);
+  // In-memory: num_points = 1 for every block (delegates to the constructor above)
   Block_Info(const Environment &env,
              const std::vector<size_t> &matrix_dimensions,
              const size_t &proc_granularity, const Verbosity &verbosity);
@@ -1353,6 +1366,14 @@ struct SDP
       const std::vector<El::BigFloat> &normalization,
       const El::BigFloat &primal_c_scale, const Block_Info &block_info,
       const El::Grid &grid);
+  // In-memory, from sampled Dual_Constraint_Groups (e.g. Output_SDP::dual_constraint_groups):
+  // groups.at(i) must describe block block_info.block_indices.at(i); objective_const,
+  // dual_objective_b and normalization must be identical on all ranks. Collective. See §3.5.
+  SDP(const El::BigFloat &objective_const,
+      const std::vector<El::BigFloat> &dual_objective_b,
+      const std::vector<Dual_Constraint_Group> &groups,
+      const std::optional<std::vector<El::BigFloat>> &normalization,
+      const Block_Info &block_info, const El::Grid &grid);
 private:
   void validate(const Block_Info &block_info) const noexcept(false);
 };
@@ -1386,8 +1407,16 @@ struct SDP_Block_Data
   SDP_Block_Data() = default;
   SDP_Block_Data(std::istream &block_stream, Block_File_Format format,
                  size_t block_index_local, const Block_Info &block_info); // bin asserts precision
+  // From an in-memory group; asserts group.block_index/dim/num_points match block_info
+  SDP_Block_Data(const Dual_Constraint_Group &group, size_t block_index_local,
+                 const Block_Info &block_info);
   // move-only
 };
+// Scatter one block into the DistMatrices of sdp. sdp_block_local needs to be valid only on
+// grid.Comm().Rank() == 0; sdp's block containers must already be sized and
+// sdp.dual_objective_b initialized. Collective over the group.
+void set_sdp_from_root(const El::Grid &grid, const Block_Info &block_info,
+                       const SDP_Block_Data &sdp_block_local, SDP &sdp);
 // SDP/read_block_data/Block_Data_Parse_Result.hxx, Json_Block_Data_Parser.hxx — JSON block parser
 
 // SDP/set_bases_blocks.hxx — expand a bilinear basis into its block-diagonal "bases block"
@@ -1441,6 +1470,7 @@ public:
   Block_Vector dual_residues;                          // d = c - Tr(A_* Y) - B y
   El::BigFloat dual_error;                             // max|d|
   El::BigFloat R_error;                                // max|mu I - XY|
+  size_t num_iterations = 0;                           // iterations completed by the last run()
   int64_t current_generation;
   boost::optional<int64_t> backup_generation;
 
@@ -2275,7 +2305,7 @@ declarations yourself.
 | `approx_objective/Approx_Parameters.hxx:27`, `pmp2functions/Pmp2functions_Parameters.hxx:24` | `to_property_tree(const Approx_Parameters&)` and `operator<<(…, const Pmp2functions_Parameters&)` declared, never defined | Link error if used. |
 | `sdp_solve/Solver_Parameters.hxx` | Defaulted constructor leaves every field uninitialized | Use §3.6. |
 | `SDP_Solver` constructor with empty `checkpoint_in` | Looks for `checkpoint.json` / `x_0.txt` in the CWD | Always set `checkpoint_in`. |
-| `sdp_solve/SDP.hxx` | No default constructor; the in-memory constructor supports only `num_points == 1` | See §3.3 / §3.4 / §3.5. |
+| `sdp_solve/SDP.hxx` | No default constructor. The `yp_to_y` in-memory constructor supports only `num_points == 1` (§3.4); general in-memory SDPs use the `Dual_Constraint_Group` constructor (§3.5) | — |
 | `BigInt_Shared_Memory_Syrk_Context` | Stores `const std::vector<int> &group_comm_sizes` by reference; `initialize_bigint_syrk_context` passes a member of a local that dies on return, leaving it dangling | Harmless today because it's only read inside the constructor (see below); don't add code that reads it later. |
 | `create_blas_job_schedule.cxx:121-124` | The `El::LOWER` branch skips the same half as `UPPER` | Only call with `El::UPPER` (what `compute_Q` does). |
 | `step/frobenius_product_symmetric.cxx:4` | Defined, never used | — |

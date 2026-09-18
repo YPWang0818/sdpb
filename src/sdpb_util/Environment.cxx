@@ -4,11 +4,16 @@
 #include "Proc_Meminfo.hxx"
 #include "assert.hxx"
 
+#include <atomic>
 #include <csignal>
 
 namespace
 {
-  bool sigterm_flag = false;
+  // Written by the SIGTERM handler and by request_termination() (possibly
+  // from another thread of a host application), read by SDP_Solver::run().
+  // A lock-free atomic is safe in both a signal handler and across threads.
+  std::atomic<bool> sigterm_flag{false};
+  static_assert(std::atomic<bool>::is_always_lock_free);
 
   void handle_sigterm(int signal)
   {
