@@ -3,7 +3,6 @@
 #include "Json_Block_Data_Parser.hxx"
 #include "pmp2sdp/Dual_Constraint_Group.hxx"
 #include "sdp_solve/SDP/set_bases_blocks.hxx"
-#include "sdpb_util/Vector_State.hxx"
 #include "sdpb_util/assert.hxx"
 #include "sdpb_util/boost_serialization.hxx"
 

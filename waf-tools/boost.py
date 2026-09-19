@@ -43,8 +43,14 @@ def configure(conf):
     else:
         boost_libdir = []
 
+    # With --libs-only (see wscript) only the embedding libraries are built. They need
+    # no Boost.Iostreams (sdp.zip output), and Boost.Process is used by the tests only.
+    libs_only = getattr(conf.options, 'libs_only', False)
+
     if conf.options.boost_libs:
         boost_libs = conf.options.boost_libs.split()
+    elif libs_only:
+        boost_libs = ['boost_program_options', 'boost_serialization']
     else:
         boost_libs = ['boost_date_time', 'boost_filesystem',
                       'boost_program_options', 'boost_iostreams', 'boost_serialization']
@@ -92,8 +98,23 @@ int main()
         conf.fatal('Could not find Boost.System')
 
     # Check other Boost libraries
-    check_config(conf,
-                 fragment="""#include <boost/iostreams/filter/gzip.hpp>
+    if libs_only:
+        boost_fragment = """#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/program_options.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/stacktrace.hpp>
+#include <sstream>
+int main()
+{
+boost::posix_time::second_clock::local_time();
+boost::program_options::options_description();
+std::stringstream ss;
+boost::archive::binary_oarchive ar(ss);
+boost::stacktrace::stacktrace();
+}
+"""
+    else:
+        boost_fragment = """#include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -110,7 +131,9 @@ boost::iostreams::gzip_compressor();
 boost::serialization::version_type version;
 boost::stacktrace::stacktrace();
 }
-""",
+"""
+    check_config(conf,
+                 fragment=boost_fragment,
                  includes=boost_incdir,
                  uselib_store='boost',
                  libpath=boost_libdir,
@@ -119,6 +142,8 @@ boost::stacktrace::stacktrace();
                  defines=boost_defines)
 
     # Link to boost_process, if necessary
+    if libs_only:
+        boost_process_lib_found = True
     if not boost_process_lib_found:
         for boost_process_libs in [[], [boost_process_lib]]:
             if check_config(conf,

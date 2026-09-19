@@ -79,6 +79,36 @@ From `wscript:25-31` — reproduce these in your build:
   fork of Elemental (`El`), libxml2, RapidJSON (headers), libarchive, a CBLAS (OpenBLAS),
   FLINT; MPSolve only for `spectrum`. See `waf-tools/*.py` for the exact flags each tool adds.
 
+### 1.3 `--libs-only`: building just the libraries, with fewer dependencies
+
+`./waf configure` checks for every package any program in the tree uses and fails without
+it, even if you only want the libraries. For an embedding that builds its problems in memory
+(§3.3–3.5) configure with
+
+```
+CXXFLAGS=-fPIC ./waf configure --libs-only [--elemental-dir=… …]
+./waf build
+```
+
+(`-fPIC` only if the libraries end up in a shared object.) This mode
+
+- builds only `sdpb_util`, `pmp`, `pmp2sdp_lib` and `sdp_solve`: no `pmp_read`, no
+  executables, no tests;
+- does not look for **MPSolve**, **libxml2** or **libarchive**, and of the compiled Boost
+  libraries needs only `program_options` and `serialization` (plus `stacktrace` when
+  present); Boost headers, GMP, MPFR, Elemental, RapidJSON, a CBLAS and FLINT are still
+  required;
+- leaves out the sources that use libarchive (`wscript`: `archive_sources`), i.e.
+  `Archive_Reader`, `write_sdp` with `Archive_Writer`/`Archive_Entry`, and the readers
+  behind the path-taking constructors. Those constructors, `SDP(sdp_path, …)` and
+  `Block_Info(env, sdp_path, …)`, still link but **throw** (`src/sdp_solve/
+  file_input_disabled.cxx`); use the in-memory constructors. Checkpoints, `save_solution`-style
+  output and `iterations.json` do not use libarchive and work as usual;
+- stores `LIBS_ONLY = True` in `build/c4che/_cache.py`, next to the `LIB_*`, `INCLUDES_*`
+  and `DEFINES_*` entries a host build system can read to link the same way.
+
+Without the option nothing changes.
+
 ---
 
 ## 2. Runtime model, global state and embedding pitfalls

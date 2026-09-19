@@ -1,8 +1,32 @@
 import os, subprocess
 
 
+# Static libraries needed to embed the solver in another program (see api-doc.md).
+# With `./waf configure --libs-only` nothing else is built, and the packages
+# that only the command-line tools and file-based SDP input need
+# (MPSolve, libxml2, libarchive, most compiled Boost libraries) are not required.
+embedding_libs = ['sdpb_util', 'pmp', 'pmp2sdp_lib', 'sdp_solve']
+
+# Sources that read or write an SDP directory / sdp.zip through libarchive.
+# They are left out in the --libs-only mode; src/sdp_solve/file_input_disabled.cxx
+# defines the reading entry points instead, and they throw.
+archive_sources = ['src/sdpb_util/Archive_Reader.cxx',
+                   'src/sdp_solve/Block_Info/read_block_info.cxx',
+                   'src/sdp_solve/SDP/read_normalization.cxx',
+                   'src/sdp_solve/SDP/read_objectives.cxx',
+                   'src/sdp_solve/SDP/read_block_data/read_block_data.cxx',
+                   'src/pmp2sdp/write_sdp.cxx',
+                   'src/pmp2sdp/Archive_Writer.cxx',
+                   'src/pmp2sdp/Archive_Entry.cxx']
+
+
 def options(opt):
     opt.load(['compiler_cxx', 'gnu_dirs'])
+    opt.add_option('--libs-only', action='store_true', default=False,
+                   help='Build only the static libraries used for embedding the solver ('
+                        + ', '.join(embedding_libs) + '), without reading SDPs from files. '
+                        'MPSolve, libxml2 and libarchive are then not needed, and of the compiled '
+                        'Boost libraries only program_options and serialization.')
     opt.load(
         ['cxx17', 'boost', 'gmpxx', 'mpfr', 'mpsolve', 'elemental', 'libxml2', 'rapidjson', 'libarchive', 'cblas',
          'flint'],
@@ -13,8 +37,13 @@ def configure(conf):
     if not 'CXX' in os.environ or os.environ['CXX'] == 'g++' or os.environ['CXX'] == 'icpc':
         conf.environ['CXX'] = 'mpicxx'
 
-    conf.load(['compiler_cxx', 'gnu_dirs', 'cxx17', 'boost', 'gmpxx', 'mpfr', 'mpsolve',
-               'elemental', 'libxml2', 'rapidjson', 'libarchive', 'cblas', 'flint'])
+    conf.env.LIBS_ONLY = bool(conf.options.libs_only)
+    if conf.env.LIBS_ONLY:
+        conf.load(['compiler_cxx', 'gnu_dirs', 'cxx17', 'boost', 'gmpxx', 'mpfr',
+                   'elemental', 'rapidjson', 'cblas', 'flint'])
+    else:
+        conf.load(['compiler_cxx', 'gnu_dirs', 'cxx17', 'boost', 'gmpxx', 'mpfr', 'mpsolve',
+                   'elemental', 'libxml2', 'rapidjson', 'libarchive', 'cblas', 'flint'])
     conf.load('clang_compilation_database', tooldir='./waf-tools')
 
     conf.env.git_version = subprocess.check_output('git describe --tags --always --dirty', universal_newlines=True,
@@ -26,6 +55,26 @@ def build(bld):
     default_defines = ['OMPI_SKIP_MPICXX', 'SDPB_VERSION_STRING="' + bld.env.git_version + '"']
     external_packages = ['cxx17', 'gmpxx', 'mpfr', 'boost', 'elemental', 'libxml2', 'rapidjson', 'libarchive', 'flint',
                          'cblas']
+    libs_only = bool(bld.env.LIBS_ONLY)
+    if libs_only:
+        external_packages = [p for p in external_packages if p not in ['libxml2', 'libarchive']]
+
+        # Register only the embedding libraries, without the libarchive sources:
+        # every other target needs an omitted package. Done here, in one place,
+        # so that the target definitions below stay as they are upstream.
+        stlib = bld.stlib
+
+        def embedding_stlib(**kw):
+            if kw['target'] not in embedding_libs:
+                return None
+            kw['source'] = [s for s in kw['source'] if s not in archive_sources]
+            if kw['target'] == 'sdp_solve':
+                kw['source'].append('src/sdp_solve/file_input_disabled.cxx')
+            return stlib(**kw)
+
+        bld.stlib = embedding_stlib
+        bld.program = lambda **kw: None
+
     # All binaries (except for sdpb_util itself) depend also on sdpb_util
     use_packages = external_packages + ['sdpb_util']
     default_includes = ['src', 'external']
@@ -57,6 +106,7 @@ def build(bld):
                          'src/sdp_solve/SDP/assign_bilinear_bases_dist.cxx',
                          'src/sdp_solve/SDP/read_block_data/read_block_data.cxx',
                          'src/sdp_solve/SDP/read_block_data/SDP_Block_Data.cxx',
+                         'src/sdp_solve/SDP/read_block_data/set_sdp_from_root.cxx',
                          'src/sdp_solve/SDP/set_bases_blocks.cxx',
                          'src/sdp_solve/SDP_Solver/save_checkpoint.cxx',
                          'src/sdp_solve/SDP_Solver/load_checkpoint/load_checkpoint.cxx',
