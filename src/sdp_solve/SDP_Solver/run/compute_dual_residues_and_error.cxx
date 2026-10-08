@@ -1,4 +1,5 @@
 #include "sdp_solve/SDP_Solver.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // dual_residues[p] = c[p] - A[p,a,b] Y[a,b] - B[p,a] y[a]
 //
@@ -46,9 +47,9 @@ void compute_dual_residues_and_error(
         }
       // dualResidues -= B * y
       // TODO: Shouldn't this be Gemv since y is a vector?
-      El::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
-               El::BigFloat(-1), *free_var_matrix_block, *y_block,
-               El::BigFloat(1), *dual_residues_block);
+      local_la::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
+                     El::BigFloat(-1), *free_var_matrix_block, *y_block,
+                     El::BigFloat(1), *dual_residues_block);
       // dualResidues += c
       El::Axpy(El::BigFloat(1), *primal_objective_c_block,
                *dual_residues_block);

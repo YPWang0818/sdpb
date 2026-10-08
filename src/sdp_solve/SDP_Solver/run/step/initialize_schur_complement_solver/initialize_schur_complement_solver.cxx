@@ -3,6 +3,7 @@
 #include "sdpb_util/Timers/Timers.hxx"
 #include "sdp_solve/SDP_Solver/run/bigint_syrk/BigInt_Shared_Memory_Syrk_Context.hxx"
 #include "sdp_solve/memory_estimates.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // Compute the quantities needed to solve the Schur complement
 // equation
@@ -105,7 +106,7 @@ void initialize_schur_complement_solver(
                                {"ranks", std::to_string(Q.Grid().Size())}});
   try
     {
-      Cholesky(El::UpperOrLowerNS::UPPER, Q);
+      local_la::Cholesky(El::UpperOrLowerNS::UPPER, Q);
     }
   catch(std::exception &e)
     {

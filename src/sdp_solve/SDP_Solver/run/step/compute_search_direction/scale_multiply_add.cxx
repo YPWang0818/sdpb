@@ -27,7 +27,7 @@ void scale_multiply_add(const El::BigFloat &alpha,
 {
   for(size_t block = 0; block < A.blocks.size(); ++block)
     {
-      El::Gemm(El::OrientationNS::NORMAL, El::OrientationNS::NORMAL, alpha,
-               A.blocks[block], B.blocks[block], beta, C.blocks[block]);
+      local_la::Gemm(El::OrientationNS::NORMAL, El::OrientationNS::NORMAL, alpha,
+                     A.blocks[block], B.blocks[block], beta, C.blocks[block]);
     }
 }

@@ -374,6 +374,7 @@ def build(bld):
                         'test/src/unit_tests/cases/calculate_matrix_square.test.cxx',
                         'test/src/unit_tests/cases/copy_matrix.test.cxx',
                         'test/src/unit_tests/cases/json.test.cxx',
+                        'test/src/unit_tests/cases/local_linalg.test.cxx',
                         'test/src/unit_tests/cases/pmp_sampling.test.cxx',
                         'test/src/unit_tests/cases/sdp_in_memory.test.cxx',
                         'test/src/unit_tests/cases/environment.test.cxx',

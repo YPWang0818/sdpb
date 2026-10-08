@@ -1,4 +1,5 @@
 #include "constraint_matrix_weighted_sum.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // result = \sum_p a[p] A_p,
 //
@@ -60,10 +61,10 @@ void constraint_matrix_weighted_sum(const Block_Info &block_info,
                            result_block_size, result_block_size));
                 {
                   auto scope = gemm_timer.scope();
-                  El::Gemm(El::Orientation::NORMAL, El::Orientation::TRANSPOSE,
-                           El::BigFloat(column_block == row_block ? 1 : 0.5),
-                           *bilinear_bases_block, scaled_bases,
-                           El::BigFloat(0), result_sub_block);
+                  local_la::Gemm(El::Orientation::NORMAL, El::Orientation::TRANSPOSE,
+                                 El::BigFloat(column_block == row_block ? 1 : 0.5),
+                                 *bilinear_bases_block, scaled_bases,
+                                 El::BigFloat(0), result_sub_block);
                 }
               }
           if(block_info.dimensions[block_index] > 1)

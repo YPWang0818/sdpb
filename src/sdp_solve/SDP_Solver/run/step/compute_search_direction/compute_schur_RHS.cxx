@@ -1,5 +1,6 @@
 #include "sdp_solve/SDP_Solver.hxx"
 #include "sdpb_util/Timers/Timers.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // Compute the vector r_x on the right-hand side of the Schur
 // complement equation:
@@ -71,9 +72,9 @@ void compute_schur_RHS(const Block_Info &block_info, const SDP &sdp,
 
                 {
                   auto scope = gemm_timer.scope();
-                  El::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
-                           El::BigFloat(1), Z_sub_block,
-                           *bilinear_bases_block, El::BigFloat(0), Z_times_q);
+                  local_la::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
+                                 El::BigFloat(1), Z_sub_block,
+                                 *bilinear_bases_block, El::BigFloat(0), Z_times_q);
                 }
                 {
                   auto scope = hadamard_timer.scope();
@@ -88,8 +89,8 @@ void compute_schur_RHS(const Block_Info &block_info, const SDP &sdp,
 
                 {
                   auto scope = gemv_timer.scope();
-                  El::Gemv(El::Orientation::TRANSPOSE, El::BigFloat(-1),
-                           q_Z_q, ones, El::BigFloat(1), dx_sub_block);
+                  local_la::Gemv(El::Orientation::TRANSPOSE, El::BigFloat(-1),
+                                 q_Z_q, ones, El::BigFloat(1), dx_sub_block);
                 }
               }
           ++Z_block;

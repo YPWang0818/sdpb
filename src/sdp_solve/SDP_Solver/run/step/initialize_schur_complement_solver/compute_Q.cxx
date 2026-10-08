@@ -4,6 +4,7 @@
 #include "sdp_solve/SDP_Solver/run/bigint_syrk/Matrix_Normalizer.hxx"
 #include "sdp_solve/memory_estimates.hxx"
 #include "sdpb_util/Timers/Timers.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // schur_off_diagonal = L^{-1} B
 void initialize_schur_off_diagonal(
@@ -34,8 +35,8 @@ void initialize_schur_off_diagonal(
 
         try
           {
-            Cholesky(El::UpperOrLowerNS::LOWER,
-                     schur_complement_cholesky.blocks[block]);
+            local_la::Cholesky(El::UpperOrLowerNS::LOWER,
+                               schur_complement_cholesky.blocks[block]);
           }
         catch(std::exception &e)
           {
@@ -58,10 +59,10 @@ void initialize_schur_off_diagonal(
           std::to_string(sdp.free_var_matrix.blocks[block].Grid().Size())}});
 
       schur_off_diagonal.blocks.push_back(sdp.free_var_matrix.blocks[block]);
-      El::Trsm(El::LeftOrRightNS::LEFT, El::UpperOrLowerNS::LOWER,
-               El::OrientationNS::NORMAL, El::UnitOrNonUnitNS::NON_UNIT,
-               El::BigFloat(1), schur_complement_cholesky.blocks[block],
-               schur_off_diagonal.blocks[block]);
+      local_la::Trsm(El::LeftOrRightNS::LEFT, El::UpperOrLowerNS::LOWER,
+                     El::OrientationNS::NORMAL, El::UnitOrNonUnitNS::NON_UNIT,
+                     El::BigFloat(1), schur_complement_cholesky.blocks[block],
+                     schur_off_diagonal.blocks[block]);
       block_timings_ms(global_block_index, 0)
         += solve_timer.elapsed_milliseconds();
     }

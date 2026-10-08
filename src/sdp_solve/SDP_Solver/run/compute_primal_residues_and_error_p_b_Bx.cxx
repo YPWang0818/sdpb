@@ -1,4 +1,5 @@
 #include "sdp_solve/SDP_Solver.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 // Compute the residue
 //
@@ -22,9 +23,9 @@ void compute_primal_residues_and_error_p_b_Bx(const Block_Info &block_info,
 
   for(auto &block_index : block_info.block_indices)
     {
-      El::Gemv(El::OrientationNS::TRANSPOSE, El::BigFloat(-1),
-               *free_var_matrix_block, *x_block, El::BigFloat(0),
-               *primal_residue_p_block);
+      local_la::Gemv(El::OrientationNS::TRANSPOSE, El::BigFloat(-1),
+                     *free_var_matrix_block, *x_block, El::BigFloat(0),
+                     *primal_residue_p_block);
 
       // The total primal error is the sum of all of the different
       // blocks.  So to prevent double counting, only add

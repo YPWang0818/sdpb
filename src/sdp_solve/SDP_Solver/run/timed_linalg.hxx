@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sdpb_util/Timers/Timers.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 #include <El.hpp>
 
@@ -14,8 +15,9 @@
 // of the solver. They are also the single dispatch point for a future
 // GPU implementation of these kernels.
 //
-// With Timers::detail() == 0 the wrappers call Elemental directly
-// and record nothing (legacy-sized profiles).
+// With Timers::detail() == 0 the wrappers record nothing (legacy-sized
+// profiles). Either way the kernels go through local_la, which runs the local
+// El::Matrix kernels when all operands live on one rank (sdpb_util/local_linalg.hxx).
 //
 // Attribute conventions:
 //   kind  : gemm | syrk | trsm | cholesky | cholesky_solve | eig
@@ -63,7 +65,7 @@ namespace timed
   {
     if(timers.detail() <= 0)
       {
-        El::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
+        local_la::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
         return;
       }
     const int64_t k
@@ -71,7 +73,7 @@ namespace timed
     Scoped_Timer timer(timers, name,
                        shape_attrs("gemm", C.Height(), C.Width(), k,
                                    ranks_of(C), std::move(extra)));
-    El::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
+    local_la::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
   }
 
   // C := alpha op(A) op(A)^T + beta C
@@ -83,7 +85,7 @@ namespace timed
   {
     if(timers.detail() <= 0)
       {
-        El::Syrk(uplo, orientation, alpha, A, beta, C);
+        local_la::Syrk(uplo, orientation, alpha, A, beta, C);
         return;
       }
     const int64_t k
@@ -91,7 +93,7 @@ namespace timed
     Scoped_Timer timer(timers, name,
                        shape_attrs("syrk", -1, C.Height(), k, ranks_of(C),
                                    std::move(extra)));
-    El::Syrk(uplo, orientation, alpha, A, beta, C);
+    local_la::Syrk(uplo, orientation, alpha, A, beta, C);
   }
 
   // B := alpha op(A)^{-1} B  (or B op(A)^{-1}), A triangular
@@ -103,13 +105,13 @@ namespace timed
   {
     if(timers.detail() <= 0)
       {
-        El::Trsm(side, uplo, orientation, diag, alpha, A, B);
+        local_la::Trsm(side, uplo, orientation, diag, alpha, A, B);
         return;
       }
     Scoped_Timer timer(timers, name,
                        shape_attrs("trsm", B.Height(), B.Width(), -1,
                                    ranks_of(B), std::move(extra)));
-    El::Trsm(side, uplo, orientation, diag, alpha, A, B);
+    local_la::Trsm(side, uplo, orientation, diag, alpha, A, B);
   }
 
   // A := Cholesky factor of A
@@ -119,13 +121,13 @@ namespace timed
   {
     if(timers.detail() <= 0)
       {
-        El::Cholesky(uplo, A);
+        local_la::Cholesky(uplo, A);
         return;
       }
     Scoped_Timer timer(timers, name,
                        shape_attrs("cholesky", -1, A.Height(), -1,
                                    ranks_of(A), std::move(extra)));
-    El::Cholesky(uplo, A);
+    local_la::Cholesky(uplo, A);
   }
 
   // B := A^{-1} B, where A = L L^T was factored by Cholesky
@@ -137,13 +139,13 @@ namespace timed
   {
     if(timers.detail() <= 0)
       {
-        El::cholesky::SolveAfter(uplo, orientation, A, B);
+        local_la::cholesky_SolveAfter(uplo, orientation, A, B);
         return;
       }
     Scoped_Timer timer(timers, name,
                        shape_attrs("cholesky_solve", B.Height(), B.Width(),
                                    -1, ranks_of(B), std::move(extra)));
-    El::cholesky::SolveAfter(uplo, orientation, A, B);
+    local_la::cholesky_SolveAfter(uplo, orientation, A, B);
   }
 
   // w := eigenvalues of Hermitian A (A is overwritten)
