@@ -83,6 +83,7 @@ def build(bld):
                       'src/sdpb_util/Boost_Float.cxx',
                       'src/sdpb_util/copy_matrix.cxx',
                       'src/sdpb_util/Environment.cxx',
+                      'src/sdpb_util/local_kernels.cxx',
                       'src/sdpb_util/memory_estimates.cxx',
                       'src/sdpb_util/Mesh.cxx',
                       'src/sdpb_util/Proc_Meminfo.cxx',

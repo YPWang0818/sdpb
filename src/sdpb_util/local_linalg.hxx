@@ -1,5 +1,7 @@
 #pragma once
 
+#include "local_kernels.hxx"
+
 #include <El.hpp>
 
 #include <cstdlib>
@@ -14,21 +16,51 @@
 // workloads those copies cost as much as the arithmetic.
 //
 // The functions below take the same arguments as the El:: kernels. When every
-// operand lives entirely on one rank they call the El::Matrix overloads on the
-// local matrices; otherwise they call the distributed El:: kernel unchanged.
-// The local kernels run the same loops in the same order, so the results are
-// bit-identical (test/src/unit_tests/cases/local_linalg.test.cxx).
+// operand lives entirely on one rank they run local kernels on the local
+// matrices; otherwise they call the distributed El:: kernel unchanged.
+// Gemm, Syrk, Trsm and cholesky_SolveAfter use local_kernels (Elemental's
+// generic loops without temporaries, bit-identical to the El::Matrix
+// overloads); Gemv and Cholesky use the El::Matrix overloads.
+// (test/src/unit_tests/cases/local_linalg.test.cxx)
 //
-// SDPB_LOCAL_KERNELS=0 in the environment disables the fast path.
+// Environment, read once:
+//   SDPB_LOCAL_KERNELS=0    no fast path (distributed kernels everywhere)
+//   SDPB_LOCAL_KERNELS=el   the El::Matrix overloads instead of local_kernels
+//   SDPB_TRSM_RECIPROCAL=1  Trsm multiplies by reciprocals of the diagonal
+//                           instead of dividing (changes the last bits)
 namespace local_la
 {
+  inline const char *env_or_empty(const char *name)
+  {
+    const char *value = std::getenv(name);
+    return value == nullptr ? "" : value;
+  }
+
   inline bool enabled()
   {
-    static const bool value = [] {
-      const char *env = std::getenv("SDPB_LOCAL_KERNELS");
-      return env == nullptr || std::strcmp(env, "0") != 0;
-    }();
+    static const bool value
+      = std::strcmp(env_or_empty("SDPB_LOCAL_KERNELS"), "0") != 0;
     return value;
+  }
+
+  // Use local_kernels (true) or the El::Matrix overloads (false)
+  inline bool own_kernels()
+  {
+    static const bool value
+      = std::strcmp(env_or_empty("SDPB_LOCAL_KERNELS"), "el") != 0;
+    return value;
+  }
+
+  inline bool trsm_reciprocal()
+  {
+    static const bool value
+      = std::strcmp(env_or_empty("SDPB_TRSM_RECIPROCAL"), "1") == 0;
+    return value;
+  }
+
+  inline bool real_orientation(const El::Orientation orientation)
+  {
+    return orientation == El::NORMAL || orientation == El::TRANSPOSE;
   }
 
   template <class T> bool is_local(const El::AbstractDistMatrix<T> &A)
@@ -70,8 +102,15 @@ namespace local_la
             const TA &A, const TB &B, const TScalar &beta, TC &C)
   {
     if(all_local(A, B, C))
-      El::Gemm(orientation_A, orientation_B, alpha, local(A), local(B), beta,
-               local(C));
+      {
+        if(own_kernels() && real_orientation(orientation_A)
+           && real_orientation(orientation_B))
+          local_kernels::gemm(orientation_A, orientation_B, alpha, local(A),
+                              local(B), beta, local(C));
+        else
+          El::Gemm(orientation_A, orientation_B, alpha, local(A), local(B),
+                   beta, local(C));
+      }
     else
       El::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
   }
@@ -99,7 +138,11 @@ namespace local_la
         auto &C_local = local(C);
         if(beta != TScalar(1))
           El::ScaleTrapezoid(beta, uplo, C_local);
-        El::Syrk(uplo, orientation, alpha, local(A), TScalar(1), C_local);
+        if(own_kernels() && real_orientation(orientation))
+          local_kernels::syrk(uplo, orientation, alpha, local(A), TScalar(1),
+                              C_local);
+        else
+          El::Syrk(uplo, orientation, alpha, local(A), TScalar(1), C_local);
       }
     else
       El::Syrk(uplo, orientation, alpha, A, beta, C);
@@ -112,7 +155,13 @@ namespace local_la
             const TScalar &alpha, const TA &A, TB &B)
   {
     if(all_local(A, B))
-      El::Trsm(side, uplo, orientation, diag, alpha, local(A), local(B));
+      {
+        if(own_kernels() && real_orientation(orientation))
+          local_kernels::trsm(side, uplo, orientation, diag, alpha, local(A),
+                              local(B), trsm_reciprocal());
+        else
+          El::Trsm(side, uplo, orientation, diag, alpha, local(A), local(B));
+      }
     else
       El::Trsm(side, uplo, orientation, diag, alpha, A, B);
   }
@@ -133,7 +182,33 @@ namespace local_la
                            TB &B)
   {
     if(all_local(A, B))
-      El::cholesky::SolveAfter(uplo, orientation, local(A), local(B));
+      {
+        if(own_kernels() && orientation == El::NORMAL)
+          {
+            // As El::cholesky::SolveAfter (whose second Trsm is ADJOINT,
+            // the same as TRANSPOSE for real numbers)
+            const El::BigFloat one(1);
+            const auto &L = local(A);
+            auto &X = local(B);
+            const bool reciprocal = trsm_reciprocal();
+            if(uplo == El::LOWER)
+              {
+                local_kernels::trsm(El::LEFT, El::LOWER, El::NORMAL,
+                                    El::NON_UNIT, one, L, X, reciprocal);
+                local_kernels::trsm(El::LEFT, El::LOWER, El::TRANSPOSE,
+                                    El::NON_UNIT, one, L, X, reciprocal);
+              }
+            else
+              {
+                local_kernels::trsm(El::LEFT, El::UPPER, El::TRANSPOSE,
+                                    El::NON_UNIT, one, L, X, reciprocal);
+                local_kernels::trsm(El::LEFT, El::UPPER, El::NORMAL,
+                                    El::NON_UNIT, one, L, X, reciprocal);
+              }
+          }
+        else
+          El::cholesky::SolveAfter(uplo, orientation, local(A), local(B));
+      }
     else
       El::cholesky::SolveAfter(uplo, orientation, A, B);
   }
