@@ -47,7 +47,8 @@ El::BigFloat corrector_centering_parameter(
 El::BigFloat
 step_length(const Block_Diagonal_Matrix &MCholesky,
             const Block_Diagonal_Matrix &dM, const El::BigFloat &gamma,
-            const std::string &which, Timers &timers);
+            const std::string &which, Timers &timers,
+            bool fast_step_length = false);
 
 void SDP_Solver::step(
   const Environment &env, const Solver_Parameters &parameters,
@@ -197,11 +198,11 @@ void SDP_Solver::step(
   // Compute step-lengths that preserve positive definiteness of X, Y
   primal_step_length
     = step_length(X_cholesky, dX, parameters.step_length_reduction,
-                  "X", timers);
+                  "X", timers, parameters.fast_step_length);
 
   dual_step_length
     = step_length(Y_cholesky, dY, parameters.step_length_reduction,
-                  "Y", timers);
+                  "Y", timers, parameters.fast_step_length);
 
   // If our problem is both dual-feasible and primal-feasible,
   // ensure we're following the true Newton direction.

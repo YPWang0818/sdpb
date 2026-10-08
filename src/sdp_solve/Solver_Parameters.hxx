@@ -16,6 +16,9 @@ struct Solver_Parameters
   size_t max_shared_memory_bytes;
   bool find_primal_feasible, find_dual_feasible, detect_primal_feasible_jump,
     detect_dual_feasible_jump;
+  // Step lengths from a double-precision lambda_min with a BigFloat Cholesky
+  // safeguard instead of the arbitrary-precision eigensolver (see step_length.cxx)
+  bool fast_step_length = false;
   size_t precision;
 
   El::BigFloat duality_gap_threshold, primal_error_threshold,

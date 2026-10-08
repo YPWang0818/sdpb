@@ -122,6 +122,14 @@ boost::program_options::options_description Solver_Parameters::options()
     "Shrink each newton step by this factor (smaller means slower, more "
     "stable convergence). Corresponds to SDPA's gammaStar.");
   result.add_options()(
+    "fastStepLength",
+    boost::program_options::bool_switch(&fast_step_length)->default_value(false),
+    "Compute the step lengths from the smallest eigenvalue of L^{-1} dM L^{-T} "
+    "in double precision (LAPACK) instead of the arbitrary-precision "
+    "eigensolver, and verify positive definiteness of the step with an "
+    "arbitrary-precision Cholesky; blocks that fail the check (e.g. entries "
+    "outside the double range) fall back to the exact eigensolver.");
+  result.add_options()(
     "minPrimalStep",
     boost::program_options::value<El::BigFloat>(&min_primal_step)
       ->default_value(El::BigFloat(0)),
@@ -180,6 +188,7 @@ boost::property_tree::ptree to_property_tree(const Solver_Parameters &p)
   result.put("feasibleCenteringParameter", p.feasible_centering_parameter);
   result.put("infeasibleCenteringParameter", p.infeasible_centering_parameter);
   result.put("stepLengthReduction", p.step_length_reduction);
+  result.put("fastStepLength", p.fast_step_length);
   result.put("maxComplementarity", p.max_complementarity);
   result.put("initialCheckpointDir", p.checkpoint_in.string());
   result.put("checkpointDir", p.checkpoint_out.string());
@@ -216,6 +225,7 @@ std::ostream &operator<<(std::ostream &os, const Solver_Parameters &p)
      << "infeasibleCenteringParameter = " << p.infeasible_centering_parameter
      << '\n'
      << "stepLengthReduction          = " << p.step_length_reduction << '\n'
+     << "fastStepLength               = " << p.fast_step_length << '\n'
      << "maxComplementarity           = " << p.max_complementarity << '\n'
      << "initialCheckpointDir         = " << p.checkpoint_in << '\n'
      << "checkpointDir                = " << p.checkpoint_out << '\n';

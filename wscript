@@ -156,6 +156,7 @@ def build(bld):
                          'src/sdp_solve/SDP_Solver/run/step/corrector_centering_parameter/frobenius_product_of_sums.cxx',
                          'src/sdp_solve/SDP_Solver/run/step/frobenius_product_symmetric.cxx',
                          'src/sdp_solve/SDP_Solver/run/step/step_length/step_length.cxx',
+                         'src/sdp_solve/SDP_Solver/run/step/step_length/fast_step_length.cxx',
                          'src/sdp_solve/SDP_Solver/run/step/step_length/min_eigenvalue.cxx',
                          'src/sdp_solve/SDP_Solver/run/step/step_length/lower_triangular_inverse_congruence.cxx',
                          'src/sdp_solve/SDP_Solver_Terminate_Reason.cxx',
