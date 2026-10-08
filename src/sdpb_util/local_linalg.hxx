@@ -132,8 +132,11 @@ namespace local_la
       Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
   }
 
-  // El::MakeSymmetric(uplo, A): the other triangle := 1 * this triangle
-  template <class TA> void MakeSymmetric(const El::UpperOrLower uplo, TA &A)
+  // El::MakeSymmetric(uplo, A) for a distributed A: the other triangle :=
+  // 1 * this triangle (a truncated copy; see local_kernels::make_symmetric).
+  // Only for DistMatrix: El::MakeSymmetric on an El::Matrix copies exactly.
+  template <class T>
+  void MakeSymmetric(const El::UpperOrLower uplo, El::ElementalMatrix<T> &A)
   {
     if(all_local(A) && own_kernels())
       local_kernels::make_symmetric(uplo, local(A));
