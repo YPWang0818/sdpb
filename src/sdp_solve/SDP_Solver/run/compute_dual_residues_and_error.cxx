@@ -61,6 +61,8 @@ void compute_dual_residues_and_error(
       ++dual_residues_block;
       ++Q_index;
     }
+  Scoped_Timer allreduce_timer(timers, "allreduce",
+                               {{"kind", "mpi"}, {"op", "allreduce"}});
   dual_error
     = El::mpi::AllReduce(local_max, El::mpi::MAX, El::mpi::COMM_WORLD);
 }

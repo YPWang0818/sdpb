@@ -56,4 +56,12 @@ $TIME_CMD $MPI_RUN_COMMAND -n 6 ./build/unit_tests --durations yes || { exit $?;
 echo $TIME_CMD ./build/integration_tests --durations yes --mpirun="$MPI_RUN_COMMAND"
 $TIME_CMD ./build/integration_tests --durations yes --mpirun="$MPI_RUN_COMMAND" || { exit $?; }
 
+# Tests of the profile analysis tool (scripts/profile), stdlib Python only
+if command -v python3 >/dev/null 2>&1; then
+  echo python3 -m unittest discover -s scripts/profile/tests -t scripts/profile
+  python3 -m unittest discover -s scripts/profile/tests -t scripts/profile || { exit $?; }
+else
+  echo "python3 not found, skipping scripts/profile tests"
+fi
+
 echo "$0: ALL TESTS PASSED"

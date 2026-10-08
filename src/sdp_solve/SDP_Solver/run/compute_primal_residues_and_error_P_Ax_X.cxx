@@ -8,7 +8,8 @@ void compute_primal_residues_and_error_P_Ax_X(
   El::BigFloat &primal_error, Timers &timers)
 {
   Scoped_Timer primal_residues_timer(timers, "computePrimalResidues");
-  constraint_matrix_weighted_sum(block_info, sdp, x, primal_residues);
+  constraint_matrix_weighted_sum(block_info, sdp, x, primal_residues, timers,
+                                 "weighted_sum");
   primal_residues -= X;
   primal_error = primal_residues.max_abs();
 }

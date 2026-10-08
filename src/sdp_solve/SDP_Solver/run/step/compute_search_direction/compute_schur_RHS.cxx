@@ -1,4 +1,5 @@
 #include "sdp_solve/SDP_Solver.hxx"
+#include "sdpb_util/Timers/Timers.hxx"
 
 // Compute the vector r_x on the right-hand side of the Schur
 // complement equation:
@@ -20,9 +21,16 @@
 
 void compute_schur_RHS(const Block_Info &block_info, const SDP &sdp,
                        const Block_Vector &dual_residues,
-                       const Block_Diagonal_Matrix &Z,
-                       Block_Vector &dx)
+                       const Block_Diagonal_Matrix &Z, Block_Vector &dx,
+                       Timers &timers)
 {
+  Scoped_Timer timer(timers, "schur_RHS");
+  // The per-tile kernels are small and numerous: accumulate them.
+  Accumulating_Timer gemm_timer(timers, "gemm_tile", {{"kind", "gemm"}});
+  Accumulating_Timer hadamard_timer(timers, "hadamard",
+                                    {{"kind", "elementwise"}});
+  Accumulating_Timer gemv_timer(timers, "gemv", {{"kind", "gemv"}});
+
   auto dual_residues_block(dual_residues.blocks.begin());
   auto dx_block(dx.blocks.begin());
 
@@ -61,11 +69,16 @@ void compute_schur_RHS(const Block_Info &block_info, const SDP &sdp,
                 El::DistMatrix<El::BigFloat> q_Z_q(Z_times_q);
                 El::Zero(q_Z_q);
 
-                El::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
-                         El::BigFloat(1), Z_sub_block, *bilinear_bases_block,
-                         El::BigFloat(0), Z_times_q);
-
-                El::Hadamard(Z_times_q, *bilinear_bases_block, q_Z_q);
+                {
+                  auto scope = gemm_timer.scope();
+                  El::Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL,
+                           El::BigFloat(1), Z_sub_block,
+                           *bilinear_bases_block, El::BigFloat(0), Z_times_q);
+                }
+                {
+                  auto scope = hadamard_timer.scope();
+                  El::Hadamard(Z_times_q, *bilinear_bases_block, q_Z_q);
+                }
 
                 const size_t dx_row_offset(
                   ((column_block * (column_block + 1)) / 2 + row_block)
@@ -73,8 +86,11 @@ void compute_schur_RHS(const Block_Info &block_info, const SDP &sdp,
                 El::DistMatrix<El::BigFloat> dx_sub_block(
                   El::View(*dx_block, dx_row_offset, 0, dx_block_size, 1));
 
-                El::Gemv(El::Orientation::TRANSPOSE, El::BigFloat(-1), q_Z_q,
-                         ones, El::BigFloat(1), dx_sub_block);
+                {
+                  auto scope = gemv_timer.scope();
+                  El::Gemv(El::Orientation::TRANSPOSE, El::BigFloat(-1),
+                           q_Z_q, ones, El::BigFloat(1), dx_sub_block);
+                }
               }
           ++Z_block;
           ++bilinear_bases_block;

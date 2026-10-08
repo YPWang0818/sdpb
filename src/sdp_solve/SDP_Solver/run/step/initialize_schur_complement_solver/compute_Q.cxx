@@ -22,7 +22,13 @@ void initialize_schur_off_diagonal(
       const auto global_block_index = block_info.block_indices.at(block);
       auto block_index_string = std::to_string(global_block_index);
       {
-        Scoped_Timer cholesky_timer(timers, "cholesky_" + block_index_string);
+        Scoped_Timer cholesky_timer(
+          timers, "cholesky",
+          {{"kind", "cholesky"},
+           {"block", block_index_string},
+           {"n", std::to_string(schur_complement.blocks[block].Height())},
+           {"ranks",
+            std::to_string(schur_complement.blocks[block].Grid().Size())}});
         schur_complement_cholesky.blocks[block]
           = schur_complement.blocks[block];
 
@@ -42,7 +48,14 @@ void initialize_schur_off_diagonal(
       }
 
       // schur_off_diagonal = L^{-1} B
-      Scoped_Timer solve_timer(timers, "solve_" + block_index_string);
+      Scoped_Timer solve_timer(
+        timers, "solve",
+        {{"kind", "trsm"},
+         {"block", block_index_string},
+         {"m", std::to_string(sdp.free_var_matrix.blocks[block].Height())},
+         {"n", std::to_string(sdp.free_var_matrix.blocks[block].Width())},
+         {"ranks",
+          std::to_string(sdp.free_var_matrix.blocks[block].Grid().Size())}});
 
       schur_off_diagonal.blocks.push_back(sdp.free_var_matrix.blocks[block]);
       El::Trsm(El::LeftOrRightNS::LEFT, El::UpperOrLowerNS::LOWER,
@@ -119,6 +132,13 @@ void syrk_Q(const Environment &env, Block_Matrix &schur_off_diagonal,
 
   // Calculate Q = P^T P
   auto uplo = El::UPPER;
+  if(timers.detail() >= 2)
+    {
+      // Probe barrier: measures how long this rank waits for the others
+      Scoped_Timer barrier_timer(timers, "probe_barrier",
+                                 {{"kind", "mpi"}, {"op", "barrier"}});
+      El::mpi::Barrier(El::mpi::COMM_WORLD);
+    }
   bigint_syrk_context.bigint_syrk_blas(uplo, P_blocks, Q, timers,
                                        block_timings_ms);
 

@@ -7,7 +7,8 @@
 void scale_multiply_add(const El::BigFloat &alpha,
                         const Block_Diagonal_Matrix &A,
                         const Block_Diagonal_Matrix &B,
-                        const El::BigFloat &beta, Block_Diagonal_Matrix &C);
+                        const El::BigFloat &beta, Block_Diagonal_Matrix &C,
+                        Timers &timers, const std::string &name);
 
 void initialize_schur_complement_solver(
   const Environment &env, const Block_Info &block_info, const SDP &sdp,
@@ -32,7 +33,7 @@ void compute_search_direction(
   const El::BigFloat &mu, const Block_Vector &primal_residue_p,
   const bool &is_corrector_phase, const El::DistMatrix<El::BigFloat> &Q,
   Block_Vector &dx, Block_Diagonal_Matrix &dX, Block_Vector &dy,
-  Block_Diagonal_Matrix &dY);
+  Block_Diagonal_Matrix &dY, Timers &timers);
 
 El::BigFloat predictor_centering_parameter(const Solver_Parameters &parameters,
                                            const bool is_primal_dual_feasible);
@@ -46,7 +47,7 @@ El::BigFloat corrector_centering_parameter(
 El::BigFloat
 step_length(const Block_Diagonal_Matrix &MCholesky,
             const Block_Diagonal_Matrix &dM, const El::BigFloat &gamma,
-            const std::string &timer_name, Timers &timers);
+            const std::string &which, Timers &timers);
 
 void SDP_Solver::step(
   const Environment &env, const Solver_Parameters &parameters,
@@ -134,7 +135,8 @@ void SDP_Solver::step(
         print_allocation_message_per_node(env, "XY",
                                           get_allocated_bytes(minus_XY));
       }
-    scale_multiply_add(El::BigFloat(-1), X, Y, El::BigFloat(0), minus_XY);
+    scale_multiply_add(El::BigFloat(-1), X, Y, El::BigFloat(0), minus_XY,
+                       timers, "product");
     XY_timer.stop();
 
     // Compute the complementarity mu = Tr(X Y)/X.dim
@@ -147,7 +149,9 @@ void SDP_Solver::step(
         terminate_now = true;
         // Block timings are not updated below, so here we already have correct values.
         // (otherwise, we might want to clear them)
-        Scoped_Timer block_timings_timer(timers, "block_timings_AllReduce");
+        Scoped_Timer block_timings_timer(
+          timers, "block_timings_AllReduce",
+          {{"kind", "mpi"}, {"op", "allreduce"}});
         El::AllReduce(block_timings_ms, El::mpi::COMM_WORLD);
         return;
       }
@@ -157,8 +161,8 @@ void SDP_Solver::step(
     R_error = compute_R_error(mu, minus_XY, timers);
 
     {
-      Scoped_Timer predictor_timer(timers,
-                                   "computeSearchDirection(betaPredictor)");
+      Scoped_Timer predictor_timer(timers, "search_direction",
+                                   {{"phase", "predictor"}});
 
       // Compute the predictor solution for (dx, dX, dy, dY)
       beta_predictor = predictor_centering_parameter(
@@ -166,13 +170,14 @@ void SDP_Solver::step(
       compute_search_direction(block_info, sdp, *this, minus_XY,
                                schur_complement_cholesky, schur_off_diagonal,
                                X_cholesky, beta_predictor, mu,
-                               primal_residue_p, false, Q, dx, dX, dy, dY);
+                               primal_residue_p, false, Q, dx, dX, dy, dY,
+                               timers);
     }
 
     // Compute the corrector solution for (dx, dX, dy, dY)
     {
-      Scoped_Timer corrector_timer(timers,
-                                   "computeSearchDirection(betaCorrector)");
+      Scoped_Timer corrector_timer(timers, "search_direction",
+                                   {{"phase", "corrector"}});
       beta_corrector = corrector_centering_parameter(
         parameters, X, dX, Y, dY, mu, is_primal_and_dual_feasible,
         total_psd_rows);
@@ -180,7 +185,8 @@ void SDP_Solver::step(
       compute_search_direction(block_info, sdp, *this, minus_XY,
                                schur_complement_cholesky, schur_off_diagonal,
                                X_cholesky, beta_corrector, mu,
-                               primal_residue_p, true, Q, dx, dX, dy, dY);
+                               primal_residue_p, true, Q, dx, dX, dy, dY,
+                               timers);
     }
 
     // Calculate condition numbers for Cholesky matrices
@@ -191,11 +197,11 @@ void SDP_Solver::step(
   // Compute step-lengths that preserve positive definiteness of X, Y
   primal_step_length
     = step_length(X_cholesky, dX, parameters.step_length_reduction,
-                  "stepLength(XCholesky)", timers);
+                  "X", timers);
 
   dual_step_length
     = step_length(Y_cholesky, dY, parameters.step_length_reduction,
-                  "stepLength(YCholesky)", timers);
+                  "Y", timers);
 
   // If our problem is both dual-feasible and primal-feasible,
   // ensure we're following the true Newton direction.
@@ -205,25 +211,36 @@ void SDP_Solver::step(
       dual_step_length = primal_step_length;
     }
 
-  // Update the primal point (x, X) += primalStepLength*(dx, dX)
-  for(size_t block = 0; block < x.blocks.size(); ++block)
-    {
-      El::Axpy(primal_step_length, dx.blocks[block], x.blocks[block]);
-    }
-  dX *= primal_step_length;
+  {
+    Scoped_Timer update_timer(timers, "update_xXyY");
+    // Update the primal point (x, X) += primalStepLength*(dx, dX)
+    for(size_t block = 0; block < x.blocks.size(); ++block)
+      {
+        El::Axpy(primal_step_length, dx.blocks[block], x.blocks[block]);
+      }
+    dX *= primal_step_length;
 
-  X += dX;
+    X += dX;
 
-  // Update the dual point (y, Y) += dualStepLength*(dy, dY)
-  for(size_t block = 0; block < dy.blocks.size(); ++block)
-    {
-      El::Axpy(dual_step_length, dy.blocks[block], y.blocks[block]);
-    }
-  dY *= dual_step_length;
+    // Update the dual point (y, Y) += dualStepLength*(dy, dY)
+    for(size_t block = 0; block < dy.blocks.size(); ++block)
+      {
+        El::Axpy(dual_step_length, dy.blocks[block], y.blocks[block]);
+      }
+    dY *= dual_step_length;
 
-  Y += dY;
+    Y += dY;
+  }
 
   // Block timings
-  Scoped_Timer block_timings_timer(timers, "block_timings_AllReduce");
+  if(timers.detail() >= 2)
+    {
+      // Probe barrier: measures how long this rank waits for the others
+      Scoped_Timer barrier_timer(timers, "probe_barrier",
+                                 {{"kind", "mpi"}, {"op", "barrier"}});
+      El::mpi::Barrier(El::mpi::COMM_WORLD);
+    }
+  Scoped_Timer block_timings_timer(timers, "block_timings_AllReduce",
+                                   {{"kind", "mpi"}, {"op", "allreduce"}});
   El::AllReduce(block_timings_ms, El::mpi::COMM_WORLD);
 }

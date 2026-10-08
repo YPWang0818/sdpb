@@ -92,7 +92,17 @@ void initialize_schur_complement_solver(
             schur_complement_cholesky, bigint_syrk_context, Q, timers,
             block_timings_ms, verbosity);
 
-  Scoped_Timer Cholesky_timer(timers, "Cholesky_Q");
+  if(timers.detail() >= 2)
+    {
+      // Probe barrier: measures how long this rank waits for the others
+      Scoped_Timer barrier_timer(timers, "probe_barrier",
+                                 {{"kind", "mpi"}, {"op", "barrier"}});
+      El::mpi::Barrier(El::mpi::COMM_WORLD);
+    }
+  Scoped_Timer Cholesky_timer(timers, "Cholesky_Q",
+                              {{"kind", "cholesky"},
+                               {"n", std::to_string(Q.Height())},
+                               {"ranks", std::to_string(Q.Grid().Size())}});
   try
     {
       Cholesky(El::UpperOrLowerNS::UPPER, Q);

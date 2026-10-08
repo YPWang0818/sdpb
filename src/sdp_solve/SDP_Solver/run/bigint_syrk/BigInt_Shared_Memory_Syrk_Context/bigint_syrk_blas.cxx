@@ -117,7 +117,7 @@ namespace
   {
     // Square each residue matrix
     {
-      Scoped_Timer blas_timer(timers, "blas_jobs");
+      Scoped_Timer blas_timer(timers, "blas_jobs", {{"kind", "blas"}});
       const auto shmem_rank = shared_memory_comm.Rank();
       for(const auto &job : blas_job_schedule.jobs_by_rank.at(shmem_rank))
         {
@@ -131,7 +131,8 @@ namespace
         }
     }
     {
-      Scoped_Timer fence_timer(timers, "fence");
+      Scoped_Timer fence_timer(timers, "fence",
+                               {{"kind", "mpi"}, {"op", "fence"}});
       output_residues_window->Fence();
     }
   }
@@ -205,7 +206,9 @@ void BigInt_Shared_Memory_Syrk_Context::bigint_syrk_blas(
       const auto &I = output_ranges.at(i);
       for(size_t j = i; j < output_window_split_factor; ++j)
         {
-          Scoped_Timer ij_timer(timers, El::BuildString("Q_", i, "_", j));
+          Scoped_Timer ij_timer(
+            timers, "Q_tile",
+            {{"i", std::to_string(i)}, {"j", std::to_string(j)}});
           const auto &J = output_ranges.at(j);
           auto bigint_output_submatrix = bigint_output(I, J);
           // Call BLAS to calculate residues for Q(I,J)
@@ -255,14 +258,18 @@ void BigInt_Shared_Memory_Syrk_Context::bigint_syrk_blas_shmem_submatrix(
     = get_blas_job_schedule(kind, uplo, output_height, output_width);
 
   // Clear input and output windows
-  clear_residues(*blas_job_schedule);
+  {
+    Scoped_Timer clear_timer(timers, "clear_residues");
+    clear_residues(*blas_job_schedule);
+  }
 
   // If input window is not big enough, we should fill input window
   // several times (taking different input block rows)
   // and call BLAS each time to update output window.
   for(size_t iter = 0; iter < input_window_split_factor; ++iter)
     {
-      Scoped_Timer iter_timer(timers, "split_P_" + std::to_string(iter));
+      Scoped_Timer iter_timer(timers, "split_P",
+                              {{"k", std::to_string(iter)}});
 
       // Compute block residues
       {

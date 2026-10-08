@@ -1,3 +1,4 @@
+#include "profile_meta.hxx"
 #include "save_c_minus_By.hxx"
 #include "sdp_solve/memory_estimates.hxx"
 #include "bigint_syrk/BigInt_Shared_Memory_Syrk_Context.hxx"
@@ -14,7 +15,8 @@ namespace fs = std::filesystem;
 void cholesky_decomposition(const Block_Diagonal_Matrix &A,
                             Block_Diagonal_Matrix &L,
                             const Block_Info &block_info,
-                            const std::string &name);
+                            const std::string &name,
+                            Timers &timers);
 
 void print_header(const Verbosity &verbosity);
 void print_iteration(
@@ -257,6 +259,10 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
     env, block_info, sdp, max_shared_memory_bytes, verbosity);
   initialize_bigint_syrk_context_timer.stop();
 
+  // Static run information for the profile (block shapes, sizes, ...)
+  profile_meta::set_problem_info(timers, env, block_info, sdp, *this,
+                                 bigint_syrk_context);
+
   initialize_timer.stop();
   auto last_checkpoint_time(std::chrono::high_resolution_clock::now());
 
@@ -322,10 +328,11 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
     }
 
   print_header(verbosity);
+  constexpr size_t profile_flush_interval = 10;
   for(size_t iteration = 1;; ++iteration)
     {
-      Scoped_Timer iteration_timer(timers,
-                                   "iter_" + std::to_string(iteration));
+      Scoped_Timer iteration_timer(timers, "iter",
+                                   {{"iter", std::to_string(iteration)}});
       if(verbosity >= Verbosity::trace && El::mpi::Rank() == 0)
         {
           El::Output("Start iteration ", iteration, " at ",
@@ -353,6 +360,7 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
                 save_c_minus_By(c_minus_By_path, block_info, sdp, y, verbosity,
                                 timers);
               }
+            timers.flush();
             return SDP_Solver_Terminate_Reason::SIGTERM_Received;
           }
       }
@@ -380,14 +388,19 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
                               timers);
             }
         }
+      // Keep the on-disk profile reasonably fresh (only if auto-save is on),
+      // so that a killed run still leaves usable profiling data.
+      if(checkpoint_now == true || iteration % profile_flush_interval == 0)
+        {
+          timers.flush();
+        }
       compute_objectives(sdp, x, y, primal_objective, dual_objective,
                          duality_gap, timers);
 
       {
-        Scoped_Timer cholesky_decomposition_timer(timers,
-                                                  "choleskyDecomposition");
-        cholesky_decomposition(X, X_cholesky, block_info, "X");
-        cholesky_decomposition(Y, Y_cholesky, block_info, "Y");
+        Scoped_Timer cholesky_decomposition_timer(timers, "cholesky_XY");
+        cholesky_decomposition(X, X_cholesky, block_info, "X", timers);
+        cholesky_decomposition(Y, Y_cholesky, block_info, "Y", timers);
       }
 
       compute_bilinear_pairings(block_info, X_cholesky, Y, sdp.bases_blocks,
@@ -441,6 +454,12 @@ SDP_Solver_Terminate_Reason SDP_Solver::run(
         {
           El::Print(block_timings_ms, "block_timings, ms:");
           El::Output();
+        }
+      if(iteration == 2)
+        {
+          // Record the block timings used for load balancing in the profile
+          timers.set_meta("block_timings_ms",
+                          profile_meta::block_timings_to_json(block_timings_ms));
         }
       if(iteration == 1)
         {

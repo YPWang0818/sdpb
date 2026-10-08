@@ -18,6 +18,8 @@ struct SDPB_Parameters
 
   Solver_Parameters solver;
   Verbosity verbosity;
+  // Profiling detail (see Timers::detail()), only used with --verbosity>=2
+  int profile_detail = 1;
 
   std::filesystem::path sdp_path, out_directory, param_path;
 

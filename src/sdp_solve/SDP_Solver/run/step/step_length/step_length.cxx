@@ -12,6 +12,7 @@
 // Inputs:
 // - MCholesky = L, the Cholesky decomposition of M (M itself is not needed)
 // - dM, a Block_Diagonal_Matrix with the same structure as M
+// - which: "X" or "Y", recorded as a timer attribute
 // Workspace:
 // - MInvDM (NB: overwritten when computing minEigenvalue)
 // - eigenvalues, a Vector of eigenvalues for each block of M
@@ -20,21 +21,21 @@
 
 // A := L^{-1} A L^{-T}
 void lower_triangular_inverse_congruence(const Block_Diagonal_Matrix &L,
-                                         Block_Diagonal_Matrix &A);
+                                         Block_Diagonal_Matrix &A,
+                                         Timers &timers);
 
-El::BigFloat min_eigenvalue(Block_Diagonal_Matrix &A);
+El::BigFloat min_eigenvalue(Block_Diagonal_Matrix &A, Timers &timers);
 
 El::BigFloat step_length(const Block_Diagonal_Matrix &MCholesky,
                          const Block_Diagonal_Matrix &dM,
-                         const El::BigFloat &gamma,
-                         const std::string &timer_name,
+                         const El::BigFloat &gamma, const std::string &which,
                          Timers &timers)
 {
-  Scoped_Timer step_length_timer(timers, timer_name);
+  Scoped_Timer step_length_timer(timers, "step_length", {{"which", which}});
   // MInvDM = L^{-1} dM L^{-T}, where M = L L^T
   Block_Diagonal_Matrix MInvDM(dM);
-  lower_triangular_inverse_congruence(MCholesky, MInvDM);
-  const El::BigFloat lambda(min_eigenvalue(MInvDM));
+  lower_triangular_inverse_congruence(MCholesky, MInvDM, timers);
+  const El::BigFloat lambda(min_eigenvalue(MInvDM, timers));
   if(lambda > -gamma)
     {
       return 1;

@@ -1,3 +1,8 @@
+#include <rapidjson/document.h>
+#include <rapidjson/istreamwrapper.h>
+
+#include <fstream>
+
 #include "integration_tests/common.hxx"
 #include <filesystem>
 
@@ -76,6 +81,35 @@ TEST_CASE("sdpb")
                                       / ("ck.profiling" + dir_suffix)
                                       / ("profiling." + std::to_string(rank));
                 REQUIRE(fs::file_size(profiling_path) > 0);
+                // No leftover temporary file from Timers::flush()
+                REQUIRE(!fs::exists(profiling_path.string() + ".tmp"));
+
+                // The profile is valid JSON with the expected structure
+                INFO("profiling_path = " << profiling_path);
+                std::ifstream is(profiling_path);
+                rapidjson::IStreamWrapper wrapper(is);
+                rapidjson::Document document;
+                document.ParseStream(wrapper);
+                REQUIRE(!document.HasParseError());
+                REQUIRE(document["schema_version"].GetInt() == 1);
+                REQUIRE(document["rank"].GetInt() == static_cast<int>(rank));
+                REQUIRE(document["num_ranks"].GetInt()
+                        == static_cast<int>(num_procs));
+                const std::string run_kind
+                  = document["meta"]["run_kind"].GetString();
+                REQUIRE(run_kind
+                        == (dir_suffix == ".1" ? "timing_run" : "main_run"));
+                REQUIRE(document["meta"]["blocks"].IsArray());
+                REQUIRE(document["timers"].IsArray());
+                REQUIRE(document["timers"].Size() > 0);
+                REQUIRE(std::string(document["timers"][0]["name"].GetString())
+                        == "sdpb.solve");
+                // Every timer's parent precedes it (pre-order)
+                for(const auto &timer : document["timers"].GetArray())
+                  {
+                    REQUIRE(timer["parent"].GetInt64() < timer["id"].GetInt64());
+                    REQUIRE(timer["elapsed"].GetInt64() >= 0);
+                  }
               }
         }
         {

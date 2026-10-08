@@ -1,4 +1,4 @@
-#include "sdp_solve/SDP_Solver.hxx"
+#include "constraint_matrix_weighted_sum.hxx"
 
 // result = \sum_p a[p] A_p,
 //
@@ -13,8 +13,14 @@
 
 void constraint_matrix_weighted_sum(const Block_Info &block_info,
                                     const SDP &sdp, const Block_Vector &a,
-                                    Block_Diagonal_Matrix &result)
+                                    Block_Diagonal_Matrix &result,
+                                    Timers &timers, const std::string &name)
 {
+  Scoped_Timer timer(timers, name);
+  Accumulating_Timer scale_timer(timers, "diagonal_scale",
+                                 {{"kind", "elementwise"}});
+  Accumulating_Timer gemm_timer(timers, "gemm_tile", {{"kind", "gemm"}});
+
   auto a_block(a.blocks.begin());
   auto result_block(result.blocks.begin());
   auto bilinear_bases_block(sdp.bilinear_bases.begin());
@@ -42,17 +48,23 @@ void constraint_matrix_weighted_sum(const Block_Info &block_info,
                 El::DistMatrix<El::BigFloat> scaled_bases(
                   *bilinear_bases_block);
 
-                El::DiagonalScale(El::LeftOrRight::RIGHT,
-                                  El::Orientation::NORMAL, sub_vector,
-                                  scaled_bases);
+                {
+                  auto scope = scale_timer.scope();
+                  El::DiagonalScale(El::LeftOrRight::RIGHT,
+                                    El::Orientation::NORMAL, sub_vector,
+                                    scaled_bases);
+                }
 
                 El::DistMatrix<El::BigFloat> result_sub_block(
                   El::View(*result_block, row_offset, column_offset,
                            result_block_size, result_block_size));
-                El::Gemm(El::Orientation::NORMAL, El::Orientation::TRANSPOSE,
-                         El::BigFloat(column_block == row_block ? 1 : 0.5),
-                         *bilinear_bases_block, scaled_bases, El::BigFloat(0),
-                         result_sub_block);
+                {
+                  auto scope = gemm_timer.scope();
+                  El::Gemm(El::Orientation::NORMAL, El::Orientation::TRANSPOSE,
+                           El::BigFloat(column_block == row_block ? 1 : 0.5),
+                           *bilinear_bases_block, scaled_bases,
+                           El::BigFloat(0), result_sub_block);
+                }
               }
           if(block_info.dimensions[block_index] > 1)
             {
@@ -63,4 +75,15 @@ void constraint_matrix_weighted_sum(const Block_Info &block_info,
         }
       ++a_block;
     }
+}
+
+// Untimed version
+void constraint_matrix_weighted_sum(const Block_Info &block_info,
+                                    const SDP &sdp, const Block_Vector &a,
+                                    Block_Diagonal_Matrix &result)
+{
+  Timers timers;
+  timers.set_detail(0);
+  constraint_matrix_weighted_sum(block_info, sdp, a, result, timers,
+                                 "weighted_sum");
 }

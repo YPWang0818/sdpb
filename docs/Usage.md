@@ -131,6 +131,69 @@ in `test/data/sdp2.zip` with a command like
 In addition to having the same block structure, the runs must also use
 the same `precision`, and number and distribution of cores.
 
+## Profiling
+
+With `--verbosity=2` (debug) or higher, `sdpb` writes a profile for every MPI rank to
+`<checkpointDir>.profiling/profiling.<rank>`. An existing `ck.profiling/` directory is
+moved to the first free `ck.profiling.N/`, so after a run that started with an automatic
+timing run you get `ck.profiling.1/` (timing run, 2 iterations) and `ck.profiling/` (the
+actual run). The profile is also flushed every 10 iterations, at every checkpoint and on
+SIGTERM, so a killed run still leaves usable data.
+
+Each file is a JSON document:
+
+```
+{"schema_version": 1, "sdpb_version": "...", "rank": 3, "num_ranks": 6, "node": 0,
+ "node_rank": 3, "num_nodes": 1, "hostname": "...", "precision_bits": 768,
+ "t0_unix_ns": ..., "t0_monotonic_ns": ..., "cpu_time": true,
+ "meta": { "run_kind": "main_run", "sdp_path": "...", "parameters": {...},
+           "blocks": [{"index": 0, "dim": 1, "num_points": 24, "schur_size": 24,
+                       "psd_sizes": [12, 12], "bilinear_pairing_size": 24}, ...],
+           "local_blocks": [0, 5], "group_size": 1, "group_rank": 0, "procs_per_node": 6,
+           "N": 20, "P": 290, "total_psd_rows": 290, "bigfloat_bytes": 112,
+           "local_sizes": {"X": ..., "A_X": ..., "schur_complement": ..., "B": ..., "Q": ..., "SDP": ...},
+           "bigint_syrk": {"num_primes": 61, "num_groups": 6, "total_block_height_per_node": 290,
+                           "input_window_split_factor": 1, "output_window_split_factor": 1},
+           "block_timings_ms": [ ... ] },
+ "timers": [
+   {"id": 0, "parent": -1, "depth": 0, "name": "sdpb.solve", "start": 0, "elapsed": 40123456789,
+    "cpu": 40100000000, "count": 1, "attrs": {}},
+   {"id": 57, "parent": 55, "depth": 6, "name": "cholesky", "start": ..., "elapsed": ..., "cpu": ...,
+    "count": 1, "attrs": {"kind": "cholesky", "block": "4", "n": "24", "ranks": "1"}},
+   ...
+ ]}
+```
+
+- Times are integer nanoseconds. `start` is relative to the creation of the timers,
+  `elapsed` is wall-clock time, `cpu` is the thread CPU time (`-1` if unavailable).
+  NB: MPI implementations usually busy-wait, so CPU time inside MPI calls is close to
+  wall time; use the timers with `"kind": "mpi"` to measure waiting.
+- The timer tree is given by `parent` ids; `name` is the leaf name. Loop instances are
+  distinguished by attributes (`iter`, `block`, `parity`, `k`, ...), not by the name.
+- The dense kernels of the solver (`Gemm`, `Syrk`, `Trsm`, `Cholesky`, `HermitianEig`,
+  Cholesky solves) are timed per block with their shapes: `kind`, `m`, `n`, `k`, `ranks`.
+  Inner loops over small tiles are accumulated into one entry with `count` and `max`.
+- `--profileDetail` controls the amount of data: `0` records only the coarse
+  phase timers, `1` (default) adds the per-block kernel timers, `2` adds MPI barrier
+  probes before the collective phases (they measure directly how long a rank waits for
+  the others, at the cost of a small perturbation).
+
+`scripts/profile/analyze_profile.py` summarises the profiles of a run (stdlib Python,
+also reads profiles of older SDPB versions):
+
+```
+python3 scripts/profile/analyze_profile.py <dir with ck.profiling/ and out/>           # share of iteration time per category
+python3 scripts/profile/analyze_profile.py <dir> --report blocks                       # per-block kernel times vs block shapes
+python3 scripts/profile/analyze_profile.py <dir> --report tree --rank 0 --max-depth 6  # averaged timer tree
+python3 scripts/profile/analyze_profile.py <dir> --report ranks                        # per-rank iteration time and MPI wait
+python3 scripts/profile/analyze_profile.py <dir> --speedup Q.syrk.blas=20 bilinear_pairings=5   # what-if (Amdahl)
+python3 scripts/profile/analyze_profile.py <dir> --compare <other dir>                 # side by side, e.g. CPU vs GPU
+```
+
+`--md`, `--csv` and `--json` write the results to files. `scripts/profile/run_matrix.py`
+runs a set of problems for several rank counts with profiling on and produces
+`manifest.json` and `summary.md`; see its `--help`.
+
 ## Running approx_objective
 
 If you have a family of SDP's and a solution to one of these SDP's,

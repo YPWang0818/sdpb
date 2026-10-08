@@ -70,12 +70,16 @@ update_cond_numbers(const El::DistMatrix<El::BigFloat> &Q,
 
   // Synchronize all at rank 0
 
-  El::mpi::Reduce(schur_complement_cholesky_cond.data(), num_blocks,
-                  El::mpi::MAX, 0, El::mpi::COMM_WORLD);
-  El::mpi::Reduce(X_cholesky_cond.data(), num_X_blocks, El::mpi::MAX, 0,
-                  El::mpi::COMM_WORLD);
-  El::mpi::Reduce(Y_cholesky_cond.data(), num_X_blocks, El::mpi::MAX, 0,
-                  El::mpi::COMM_WORLD);
+  {
+    Scoped_Timer reduce_timer(timers, "reduce",
+                              {{"kind", "mpi"}, {"op", "reduce"}});
+    El::mpi::Reduce(schur_complement_cholesky_cond.data(), num_blocks,
+                    El::mpi::MAX, 0, El::mpi::COMM_WORLD);
+    El::mpi::Reduce(X_cholesky_cond.data(), num_X_blocks, El::mpi::MAX, 0,
+                    El::mpi::COMM_WORLD);
+    El::mpi::Reduce(Y_cholesky_cond.data(), num_X_blocks, El::mpi::MAX, 0,
+                    El::mpi::COMM_WORLD);
+  }
 
   if(El::mpi::Rank() == 0)
     {

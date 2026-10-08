@@ -325,6 +325,7 @@ void BigInt_Shared_Memory_Syrk_Context::compute_block_residues(
   }
 
   // wait for all ranks to fill input_block_residues_window
-  Scoped_Timer fence_timer(timers, "fence");
+  Scoped_Timer fence_timer(timers, "fence",
+                               {{"kind", "mpi"}, {"op", "fence"}});
   grouped_block_residues_window.Fence();
 }

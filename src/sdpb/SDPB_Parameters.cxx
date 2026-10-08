@@ -62,6 +62,12 @@ SDPB_Parameters::SDPB_Parameters(int argc, char *argv[])
     po::value<Verbosity>(&verbosity)->default_value(Verbosity::regular),
     "Verbosity.  0 -> no output, 1 -> regular output, 2 -> debug output, 3 -> "
     "trace output");
+  basic_options.add_options()(
+    "profileDetail", po::value<int>(&profile_detail)->default_value(1),
+    "Detail of the per-rank profiles written to <checkpointDir>.profiling/ "
+    "when --verbosity>=2. 0 -> coarse timers only, 1 -> per-block kernel "
+    "timers with matrix shapes, 2 -> also MPI barrier probes before the "
+    "collective phases (perturbs timings slightly).");
 
   po::options_description obsolete_options("Obsolete options");
   obsolete_options.add_options()(
@@ -238,6 +244,7 @@ boost::property_tree::ptree to_property_tree(const SDPB_Parameters &p)
   result.put("writeSolution", p.write_solution);
   result.put("procGranularity", p.proc_granularity);
   result.put("verbosity", static_cast<int>(p.verbosity));
+  result.put("profileDetail", p.profile_detail);
 
   return result;
 }
@@ -252,6 +259,7 @@ std::ostream &operator<<(std::ostream &os, const SDPB_Parameters &p)
      << "writeSolution                = " << p.write_solution << '\n'
      << "procGranularity              = " << p.proc_granularity << '\n'
      << "verbosity                    = " << static_cast<int>(p.verbosity)
-     << '\n';
+     << '\n'
+     << "profileDetail                = " << p.profile_detail << '\n';
   return os;
 }

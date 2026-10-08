@@ -25,5 +25,7 @@ compute_R_error(const El::BigFloat &mu, const Block_Diagonal_Matrix &minus_XY,
             R_error = std::max(R_error, El::Abs(R_element_value));
           }
     }
+  Scoped_Timer allreduce_timer(timers, "allreduce",
+                               {{"kind", "mpi"}, {"op", "allreduce"}});
   return El::mpi::AllReduce(R_error, El::mpi::MAX, El::mpi::COMM_WORLD);
 }

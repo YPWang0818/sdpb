@@ -15,18 +15,23 @@
 
 namespace fs = std::filesystem;
 
+// profiling_dir: if not empty, per-rank profiles are auto-saved there
+// during the run (see Timers::flush()).
 Timers solve(const Block_Info &block_info, const SDPB_Parameters &parameters,
              const Environment &env,
              const std::chrono::time_point<std::chrono::high_resolution_clock>
                &start_time,
-             El::Matrix<int32_t> &block_timings_ms);
+             El::Matrix<int32_t> &block_timings_ms,
+             const fs::path &profiling_dir, const std::string &run_kind);
 
 void write_block_timings(const fs::path &checkpoint_out,
                          const Block_Info &block_info,
                          const El::Matrix<int32_t> &block_timings_ms,
                          Verbosity verbosity);
 
-void write_profiling(const fs::path &checkpoint_out, const Timers &timers);
+// Rotate old ck.profiling/ to ck.profiling.N/ and return ck.profiling/
+fs::path prepare_profiling_dir(const fs::path &checkpoint_out);
+void write_profiling(const fs::path &profiling_dir, const Timers &timers);
 
 int main(int argc, char **argv)
 {
@@ -110,8 +115,15 @@ int main(int argc, char **argv)
               timing_parameters.verbosity = Verbosity::none;
             }
           El::Matrix<int32_t> block_timings_ms;
+          fs::path profiling_dir;
+          if(timing_parameters.verbosity >= Verbosity::debug)
+            {
+              profiling_dir
+                = prepare_profiling_dir(parameters.solver.checkpoint_out);
+            }
           Timers timers(solve(block_info, timing_parameters, env, start_time,
-                              block_timings_ms));
+                              block_timings_ms, profiling_dir,
+                              "timing_run"));
 
           if(block_timings_ms.Height() == 0 && block_timings_ms.Width() == 0)
             {
@@ -123,11 +135,11 @@ int main(int argc, char **argv)
           write_block_timings(timing_parameters.solver.checkpoint_out,
                               block_info, block_timings_ms,
                               timing_parameters.verbosity);
-          if(timing_parameters.verbosity >= Verbosity::debug)
+          if(!profiling_dir.empty())
             {
               try
                 {
-                  write_profiling(parameters.solver.checkpoint_out, timers);
+                  write_profiling(profiling_dir, timers);
                 }
               catch(std::exception &e)
                 {
@@ -162,13 +174,19 @@ int main(int argc, char **argv)
             }
         }
       El::Matrix<int32_t> block_timings_ms;
-      Timers timers(
-        solve(block_info, parameters, env, start_time, block_timings_ms));
+      fs::path profiling_dir;
       if(parameters.verbosity >= Verbosity::debug)
+        {
+          profiling_dir
+            = prepare_profiling_dir(parameters.solver.checkpoint_out);
+        }
+      Timers timers(solve(block_info, parameters, env, start_time,
+                          block_timings_ms, profiling_dir, "main_run"));
+      if(!profiling_dir.empty())
         {
           try
             {
-              write_profiling(parameters.solver.checkpoint_out, timers);
+              write_profiling(profiling_dir, timers);
             }
           catch(std::exception &e)
             {

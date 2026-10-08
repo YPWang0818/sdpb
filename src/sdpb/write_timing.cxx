@@ -4,9 +4,13 @@
 
 namespace fs = std::filesystem;
 
-void write_profiling(const fs::path &checkpoint_out, const Timers &timers)
+// Directory for per-rank profiles: ck.profiling/
+// If it exists, rank 0 moves it to the first free ck.profiling.N/
+// (so that the profiles of the timing run end up in ck.profiling.N/
+// and the profiles of the actual run in ck.profiling/).
+// All ranks must call it before solve() starts auto-saving profiles there.
+fs::path prepare_profiling_dir(const fs::path &checkpoint_out)
 {
-  // Write profiling for each rank to ck.profiling/profiling.{rank}
   fs::path parent_dir = checkpoint_out.string() + ".profiling";
 
   // Move old profiling data to ck.profiling.0/
@@ -27,8 +31,19 @@ void write_profiling(const fs::path &checkpoint_out, const Timers &timers)
     }
   // Barrier to ensure that we'll move old ck.profiling/ before writing to it
   El::mpi::Barrier();
-  timers.write_profile(parent_dir
-                       / ("profiling." + std::to_string(El::mpi::Rank())));
+  return parent_dir;
+}
+
+// ck.profiling/profiling.{rank}
+fs::path profiling_path(const fs::path &profiling_dir)
+{
+  return profiling_dir / ("profiling." + std::to_string(El::mpi::Rank()));
+}
+
+// Write profiling for each rank to ck.profiling/profiling.{rank}
+void write_profiling(const fs::path &profiling_dir, const Timers &timers)
+{
+  timers.write_profile(profiling_path(profiling_dir));
 }
 
 void write_block_timings(const fs::path &checkpoint_out,

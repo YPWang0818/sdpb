@@ -1,5 +1,8 @@
 #include "sdp_solve/Block_Diagonal_Matrix.hxx"
 #include "sdp_solve/Block_Info.hxx"
+#include "sdp_solve/SDP_Solver/run/timed_linalg.hxx"
+
+#include <optional>
 
 // A_X_inv = bilinear_base^T X^{-1} bilinear_base for each block
 
@@ -7,33 +10,49 @@ void compute_A_X_inv(
   const Block_Info &block_info, const Block_Diagonal_Matrix &X_cholesky,
   const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
   std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
-             2> &A_X_inv)
+             2> &A_X_inv,
+  Timers &timers)
 {
+  Scoped_Timer A_X_inv_timer(timers, "A_X_inv");
   A_X_inv[0].resize(bases_blocks.size());
   A_X_inv[1].resize(bases_blocks.size());
 
   for(size_t index(0); index < bases_blocks.size(); ++index)
     {
+      const size_t parity(index % 2), Q_index(index / 2);
+      const size_t block_index(block_info.block_indices.at(Q_index));
+      const size_t block_size(block_info.num_points.at(block_index)),
+        dim(block_info.dimensions.at(block_index));
+
+      // Per-block timer (profile detail >= 1)
+      std::optional<Scoped_Timer> block_timer;
+      if(timers.detail() >= 1)
+        block_timer.emplace(timers, "block",
+                            Timer_Attrs{{"block", std::to_string(block_index)},
+                                        {"parity", std::to_string(parity)},
+                                        {"dim", std::to_string(dim)},
+                                        {"K", std::to_string(block_size)}});
+
       auto &block(bases_blocks[index]);
       auto &X_cholesky_block(X_cholesky.blocks[index]);
       El::DistMatrix<El::BigFloat> temp_space(block),
         A_X_inv_matrix(block.Width(), block.Width(), block.Grid());
-      El::Trsm(El::LeftOrRight::LEFT, El::UpperOrLowerNS::LOWER,
-               El::Orientation::NORMAL, El::UnitOrNonUnit::NON_UNIT,
-               El::BigFloat(1), X_cholesky_block, temp_space);
+      timed::Trsm(timers, "trsm", El::LeftOrRight::LEFT,
+                  El::UpperOrLowerNS::LOWER, El::Orientation::NORMAL,
+                  El::UnitOrNonUnit::NON_UNIT, El::BigFloat(1),
+                  X_cholesky_block, temp_space);
 
       // We have to set this to zero because the values can be NaN.
       // Multiplying 0*NaN = NaN.
       El::Zero(A_X_inv_matrix);
-      El::Syrk(El::UpperOrLowerNS::LOWER, El::Orientation::TRANSPOSE,
-               El::BigFloat(1), temp_space, El::BigFloat(0), A_X_inv_matrix);
+      timed::Syrk(timers, "syrk", El::UpperOrLowerNS::LOWER,
+                  El::Orientation::TRANSPOSE, El::BigFloat(1), temp_space,
+                  El::BigFloat(0), A_X_inv_matrix);
       El::MakeSymmetric(El::UpperOrLower::LOWER, A_X_inv_matrix);
 
-      const size_t block_size(
-        block_info.num_points.at(block_info.block_indices.at(index / 2))),
-        dim(block_info.dimensions.at(block_info.block_indices.at(index / 2)));
-
-      const size_t parity(index % 2), Q_index(index / 2);
+      std::optional<Scoped_Timer> split_timer;
+      if(timers.detail() >= 1)
+        split_timer.emplace(timers, "split_tiles");
       auto &A_X_inv_block(A_X_inv[parity][Q_index]);
       A_X_inv_block.resize(dim);
       for(size_t column_block = 0; column_block < dim; ++column_block)
@@ -55,4 +74,16 @@ void compute_A_X_inv(
             }
         }
     }
+}
+
+// Untimed version (used by approx_objective)
+void compute_A_X_inv(
+  const Block_Info &block_info, const Block_Diagonal_Matrix &X_cholesky,
+  const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
+  std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
+             2> &A_X_inv)
+{
+  Timers timers;
+  timers.set_detail(0);
+  compute_A_X_inv(block_info, X_cholesky, bases_blocks, A_X_inv, timers);
 }

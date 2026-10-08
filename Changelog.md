@@ -1,3 +1,18 @@
+# Unreleased
+
+## New features
+
+### sdpb
+- Profiling infrastructure for the solver (`docs/Usage.md`, "Profiling"): the per-rank
+  profiles written with `--verbosity=2` to `<checkpointDir>.profiling/profiling.<rank>` are
+  now valid JSON with an explicit timer tree, nanosecond wall and thread CPU times, matrix
+  shapes of every dense kernel call, MPI-wait timers and run metadata (block shapes, sizes,
+  `bigint_syrk` parameters). The profiles are flushed every 10 iterations, at checkpoints
+  and on SIGTERM. New option `--profileDetail` (0, 1, 2). `scripts/profile/analyze_profile.py`
+  reports the share of iteration time per solver phase, per-block kernel times vs block
+  shapes, an Amdahl what-if model and CPU-vs-GPU comparisons; `scripts/profile/run_matrix.py`
+  runs profiling matrices. The old pseudo-JSON profile format is no longer written.
+
 # Version 3.1.0
 
 ## New features

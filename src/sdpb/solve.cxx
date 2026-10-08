@@ -1,6 +1,7 @@
 #include "SDPB_Parameters.hxx"
 #include "sdp_solve/memory_estimates.hxx"
 #include "sdp_solve/sdp_solve.hxx"
+#include "sdp_solve/SDP_Solver/run/profile_meta.hxx"
 #include "sdpb_util/ostream/pretty_print_bytes.hxx"
 #include "sdpb_util/ostream/set_stream_precision.hxx"
 
@@ -8,6 +9,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/property_tree/json_parser.hpp>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -24,9 +26,21 @@ Timers solve(const Block_Info &block_info, const SDPB_Parameters &parameters,
              const Environment &env,
              const std::chrono::time_point<std::chrono::high_resolution_clock>
                &start_time,
-             El::Matrix<int32_t> &block_timings_ms)
+             El::Matrix<int32_t> &block_timings_ms,
+             const fs::path &profiling_dir, const std::string &run_kind)
 {
   Timers timers(env, parameters.verbosity);
+  timers.set_detail(parameters.profile_detail);
+  if(!profiling_dir.empty())
+    {
+      // Partial profiles are flushed here during the run,
+      // the final one is written by write_profiling() in main().
+      timers.set_autosave_path(
+        profiling_dir / ("profiling." + std::to_string(El::mpi::Rank())));
+    }
+  timers.set_meta("run_kind", profile_meta::json_string(run_kind));
+  timers.set_meta("sdp_path",
+                  profile_meta::json_string(parameters.sdp_path.string()));
   Scoped_Timer solve_timer(timers, "sdpb.solve");
 
   El::Grid grid(block_info.mpi_comm.value);
@@ -58,6 +72,11 @@ Timers solve(const Block_Info &block_info, const SDPB_Parameters &parameters,
 
   const boost::property_tree::ptree parameters_tree(
     to_property_tree(parameters));
+  {
+    std::ostringstream parameters_json;
+    boost::property_tree::write_json(parameters_json, parameters_tree, false);
+    timers.set_meta("parameters", parameters_json.str());
+  }
 
   const auto iterations_json_path
     = parameters.out_directory / "iterations.json";
@@ -100,6 +119,7 @@ Timers solve(const Block_Info &block_info, const SDPB_Parameters &parameters,
     {
       if(El::mpi::Rank() == 0)
         El::Output("Received SIGTERM, exiting gracefully...");
+      timers.flush();
       MPI_Finalize();
       std::exit(SIGTERM);
     }

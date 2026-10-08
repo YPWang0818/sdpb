@@ -6,13 +6,15 @@ void compute_A_X_inv(
   const Block_Info &block_info, const Block_Diagonal_Matrix &X_cholesky,
   const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
   std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
-             2> &A_X_inv);
+             2> &A_X_inv,
+  Timers &timers);
 
 void compute_A_Y(
   const Block_Info &block_info, const Block_Diagonal_Matrix &Y,
   const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
   std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
-             2> &A_Y);
+             2> &A_Y,
+  Timers &timers);
 
 void compute_bilinear_pairings(
   const Block_Info &block_info, const Block_Diagonal_Matrix &X_cholesky,
@@ -25,7 +27,7 @@ void compute_bilinear_pairings(
   Timers &timers)
 {
   Scoped_Timer congruence_timer(timers, "bilinear_pairings");
-  compute_A_X_inv(block_info, X_cholesky, bases_blocks, A_X_inv);
+  compute_A_X_inv(block_info, X_cholesky, bases_blocks, A_X_inv, timers);
 
-  compute_A_Y(block_info, Y, bases_blocks, A_Y);
+  compute_A_Y(block_info, Y, bases_blocks, A_Y, timers);
 }

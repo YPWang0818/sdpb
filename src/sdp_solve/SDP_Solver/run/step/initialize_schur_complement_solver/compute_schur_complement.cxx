@@ -2,6 +2,8 @@
 #include "sdp_solve/Block_Info.hxx"
 #include "sdpb_util/Timers/Timers.hxx"
 
+#include <optional>
+
 // Compute the SchurComplement matrix using A_X_inv and
 // A_Y and the formula
 //
@@ -32,6 +34,19 @@ void compute_schur_complement(
     {
       const size_t block_size(block_info.num_points[block_index]),
         dim(block_info.dimensions[block_index]);
+
+      // Per-block timer (profile detail >= 1)
+      std::optional<Scoped_Timer> block_timer;
+      if(timers.detail() >= 1)
+        block_timer.emplace(
+          timers, "block",
+          Timer_Attrs{
+            {"kind", "elementwise"},
+            {"block", std::to_string(block_index)},
+            {"dim", std::to_string(dim)},
+            {"K", std::to_string(block_size)},
+            {"S", std::to_string(schur_complement_block->Height())},
+            {"ranks", std::to_string(schur_complement_block->Grid().Size())}});
 
       El::DistMatrix<El::BigFloat> temp(block_size, block_size,
                                         schur_complement_block->Grid()),

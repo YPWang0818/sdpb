@@ -51,6 +51,24 @@ public:
                         El::DistMatrix<El::BigFloat> &bigint_output,
                         Timers &timers, El::Matrix<int32_t> &block_timings_ms);
 
+  // Static information for profiling, see profile_meta.hxx
+  struct Profile_Info
+  {
+    size_t num_primes;
+    size_t num_groups;
+    int total_block_height_per_node;
+    size_t input_window_split_factor;
+    size_t output_window_split_factor;
+  };
+  [[nodiscard]] Profile_Info profile_info() const
+  {
+    return {comb.num_primes,
+            num_groups,
+            total_block_height_per_node,
+            input_window_split_factor,
+            output_window_split_factor};
+  }
+
 private:
   El::mpi::Comm shared_memory_comm;
   // Index of MPI group on a node

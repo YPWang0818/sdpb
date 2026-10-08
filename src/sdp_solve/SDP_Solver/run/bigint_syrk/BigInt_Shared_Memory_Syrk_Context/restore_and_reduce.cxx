@@ -82,7 +82,8 @@ void BigInt_Shared_Memory_Syrk_Context::restore_and_reduce(
     {
       // Ensure that no one will write to the window until we finish
       // (if we split Q, the window is reused multimple times)
-      Scoped_Timer fence_timer(timers, "fence");
+      Scoped_Timer fence_timer(timers, "fence",
+                               {{"kind", "mpi"}, {"op", "fence"}});
       output_residues_window->Fence();
       return;
     }
@@ -136,8 +137,8 @@ void BigInt_Shared_Memory_Syrk_Context::restore_and_reduce(
     // will be probably worse.
     for(int rank_offset = 1; rank_offset < reduce_comm.Size(); ++rank_offset)
       {
-        Scoped_Timer iter_timer(timers,
-                                "offset=" + std::to_string(rank_offset));
+        Scoped_Timer iter_timer(timers, "reduce_step",
+                                {{"offset", std::to_string(rank_offset)}});
         const int to = (reduce_rank + rank_offset) % reduce_comm.Size();
         const int from = (reduce_comm.Size() + reduce_rank - rank_offset)
                          % reduce_comm.Size();
@@ -180,7 +181,8 @@ void BigInt_Shared_Memory_Syrk_Context::restore_and_reduce(
         recv_buf.resize(num_output_elements.at(reduce_rank) * serialized_size);
 
         {
-          Scoped_Timer mpi_sendrecv_timer(timers, "mpi_sendrecv");
+          Scoped_Timer mpi_sendrecv_timer(
+            timers, "mpi_sendrecv", {{"kind", "mpi"}, {"op", "sendrecv"}});
           El::mpi::SendRecv(send_buf.data(), send_buf.size(), to,
                             recv_buf.data(), recv_buf.size(), from,
                             reduce_comm);
@@ -214,6 +216,7 @@ void BigInt_Shared_Memory_Syrk_Context::restore_and_reduce(
 
   // Ensure that no one will write to the window until we finish
   // (if we split Q, the window is reused multimple times)
-  Scoped_Timer fence_timer(timers, "fence");
+  Scoped_Timer fence_timer(timers, "fence",
+                               {{"kind", "mpi"}, {"op", "fence"}});
   output_residues_window->Fence();
 }

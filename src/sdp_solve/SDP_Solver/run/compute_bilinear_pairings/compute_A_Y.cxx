@@ -1,5 +1,8 @@
 #include "sdp_solve/Block_Diagonal_Matrix.hxx"
 #include "sdp_solve/Block_Info.hxx"
+#include "sdp_solve/SDP_Solver/run/timed_linalg.hxx"
+
+#include <optional>
 
 // A_Y[b] = Q[b]'^T A[b] Q[b]' for each block 0 <= b < Q.size()
 // A_Y[b], A[b] denote the b-th blocks of A_Y,
@@ -17,33 +20,50 @@ void compute_A_Y(
   const Block_Info &block_info, const Block_Diagonal_Matrix &Y,
   const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
   std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
-             2> &A_Y)
+             2> &A_Y,
+  Timers &timers)
 {
+  Scoped_Timer A_Y_timer(timers, "A_Y");
   A_Y[0].resize(bases_blocks.size() / 2);
   A_Y[1].resize(bases_blocks.size() / 2);
 
   for(size_t index(0); index < bases_blocks.size(); ++index)
     {
+      const size_t parity(index % 2), Q_index(index / 2);
+      const size_t block_index(block_info.block_indices.at(Q_index));
+      const size_t block_size(block_info.num_points.at(block_index)),
+        dim(block_info.dimensions.at(block_index));
+
+      // Per-block timer (profile detail >= 1)
+      std::optional<Scoped_Timer> block_timer;
+      if(timers.detail() >= 1)
+        block_timer.emplace(timers, "block",
+                            Timer_Attrs{{"block", std::to_string(block_index)},
+                                        {"parity", std::to_string(parity)},
+                                        {"dim", std::to_string(dim)},
+                                        {"K", std::to_string(block_size)}});
+
       auto &block(bases_blocks[index]);
       auto &Y_block(Y.blocks[index]);
 
       El::DistMatrix<El::BigFloat> Y_Q(block),
         A_Y_matrix_temp(block.Width(), block.Width(), block.Grid());
-      Gemm(El::Orientation::NORMAL, El::Orientation::NORMAL, El::BigFloat(1),
-           Y_block, block, El::BigFloat(0), Y_Q);
+      timed::Gemm(timers, "gemm1", El::Orientation::NORMAL,
+                  El::Orientation::NORMAL, El::BigFloat(1), Y_block, block,
+                  El::BigFloat(0), Y_Q);
 
-      Gemm(El::Orientation::TRANSPOSE, El::Orientation::NORMAL,
-           El::BigFloat(1), block, Y_Q, El::BigFloat(0), A_Y_matrix_temp);
+      timed::Gemm(timers, "gemm2", El::Orientation::TRANSPOSE,
+                  El::Orientation::NORMAL, El::BigFloat(1), block, Y_Q,
+                  El::BigFloat(0), A_Y_matrix_temp);
 
-      const size_t block_size(
-        block_info.num_points.at(block_info.block_indices.at(index / 2))),
-        dim(block_info.dimensions.at(block_info.block_indices.at(index / 2))),
-        parity(index % 2), Q_index(index / 2);
       auto &A_Y_block(A_Y[parity][Q_index]);
       A_Y_block.resize(dim);
 
       El::MakeSymmetric(El::UpperOrLower::LOWER, A_Y_matrix_temp);
 
+      std::optional<Scoped_Timer> split_timer;
+      if(timers.detail() >= 1)
+        split_timer.emplace(timers, "split_tiles");
       for(size_t column_block = 0; column_block < dim; ++column_block)
         {
           A_Y_block[column_block].clear();
@@ -63,4 +83,16 @@ void compute_A_Y(
             }
         }
     }
+}
+
+// Untimed version (used by approx_objective)
+void compute_A_Y(
+  const Block_Info &block_info, const Block_Diagonal_Matrix &Y,
+  const std::vector<El::DistMatrix<El::BigFloat>> &bases_blocks,
+  std::array<std::vector<std::vector<std::vector<El::DistMatrix<El::BigFloat>>>>,
+             2> &A_Y)
+{
+  Timers timers;
+  timers.set_detail(0);
+  compute_A_Y(block_info, Y, bases_blocks, A_Y, timers);
 }
