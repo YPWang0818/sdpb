@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -92,7 +93,11 @@ private:
   std::filesystem::path autosave_path;
 
   // Profiling detail level, see --profileDetail in sdpb.
-  // 0: coarse timers only, 1: default, 2: more attributes, 3: probe barriers
+  // 0: coarse timers only, 1: default, 2: more attributes, 3: probe barriers.
+  // detail_off (-1): no timer is recorded at all; Scoped_Timer still measures
+  // its own elapsed time (for callers that use it), Accumulating_Timer counts
+  // nothing. For solves nobody profiles (e.g. sdpb_python without
+  // profile_path), where building the timer tree costs a few percent.
   int detail_level = 1;
 
 public:
@@ -127,8 +132,11 @@ public:
   // Does nothing if no autosave path is set. Never throws.
   void flush() const noexcept;
 
+  static constexpr int detail_off = -1;
   void set_detail(int level);
   [[nodiscard]] int detail() const;
+  // false at detail_off: timers record nothing
+  [[nodiscard]] bool enabled() const;
 
   [[nodiscard]] const std::list<Timer_Entry> &entries() const;
   [[nodiscard]] std::chrono::steady_clock::time_point t0() const;
@@ -176,11 +184,16 @@ struct Scoped_Timer : boost::noncopyable
 
 private:
   Timers &timers;
-  Timer_Entry &entry;
+  // The recorded entry, or nullptr when the timers are off
+  // (then own_timer measures this scope).
+  Timer_Entry *entry;
+  std::optional<Timer> own_timer;
   std::string old_prefix;
   std::string new_prefix;
 
   [[nodiscard]] bool is_running() const;
+  [[nodiscard]] Timer &active_timer();
+  [[nodiscard]] const Timer &active_timer() const;
 };
 
 // Timer for loops: one entry in the profile, many timed scopes.
@@ -205,7 +218,7 @@ struct Accumulating_Timer : boost::noncopyable
   private:
     Accumulating_Timer &owner;
     std::chrono::steady_clock::time_point start;
-    int64_t cpu_start;
+    int64_t cpu_start = -1;
   };
 
   Accumulating_Timer(Timers &timers, const std::string &name,
@@ -223,6 +236,7 @@ struct Accumulating_Timer : boost::noncopyable
   [[nodiscard]] int64_t elapsed_nanoseconds() const;
 
 private:
-  Timer_Entry &entry;
+  // nullptr when the timers are off: scopes then measure nothing
+  Timer_Entry *entry;
   void add(int64_t wall_ns, int64_t cpu_ns);
 };

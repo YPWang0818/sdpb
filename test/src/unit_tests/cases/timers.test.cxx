@@ -175,3 +175,32 @@ TEST_CASE("timers")
     outer.stop();
   }
 }
+
+TEST_CASE("timers off")
+{
+  Environment env;
+  Timers timers(env, Verbosity::none);
+  timers.set_detail(Timers::detail_off);
+  REQUIRE(!timers.enabled());
+  {
+    Scoped_Timer root(timers, "root", {{"kind", "gemm"}});
+    root.add_attr("m", 3);
+    Accumulating_Timer inner(timers, "inner");
+    for(int i = 0; i < 3; ++i)
+      {
+        auto scope = inner.scope();
+        sleep_ms(1);
+      }
+    REQUIRE(inner.count() == 0);
+    REQUIRE(inner.elapsed_nanoseconds() == 0);
+    Scoped_Timer nested(timers, "nested");
+    sleep_ms(2);
+    nested.stop();
+    // Scoped timers still measure their own scope
+    REQUIRE(nested.elapsed_milliseconds() >= 2);
+    REQUIRE(root.elapsed_milliseconds() >= 5);
+  }
+  // ... but nothing is recorded
+  REQUIRE(timers.entries().empty());
+  REQUIRE_THROWS(timers.elapsed_milliseconds("root"));
+}

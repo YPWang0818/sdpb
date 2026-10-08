@@ -277,6 +277,10 @@ int Timers::detail() const
 {
   return detail_level;
 }
+bool Timers::enabled() const
+{
+  return detail_level != detail_off;
+}
 const std::list<Timer_Entry> &Timers::entries() const
 {
   return named_timers;
