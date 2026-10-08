@@ -25,6 +25,7 @@
     "feasibleCenteringParameter": "0.1",
     "infeasibleCenteringParameter": "0.3",
     "stepLengthReduction": "0.7",
+    "fastStepLength": "false",
     "maxComplementarity": "1e+100",
     "initialCheckpointDir": "test\/out\/outer_limits\/mpirun-1\/ck",
     "checkpointDir": "test\/out\/outer_limits\/mpirun-1\/ck",
