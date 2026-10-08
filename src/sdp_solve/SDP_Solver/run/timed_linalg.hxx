@@ -76,6 +76,32 @@ namespace timed
     local_la::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
   }
 
+  // The uplo triangle of C := alpha op(A) op(B) + beta C (see
+  // local_la::Gemm_triangle), for products that are symmetrized afterwards
+  template <class TScalar, class TA, class TB, class TC>
+  void Gemm_triangle(Timers &timers, const std::string &name,
+                     const El::UpperOrLower uplo,
+                     const El::Orientation orientation_A,
+                     const El::Orientation orientation_B, const TScalar &alpha,
+                     const TA &A, const TB &B, const TScalar &beta, TC &C,
+                     Timer_Attrs extra = {})
+  {
+    if(timers.detail() <= 0)
+      {
+        local_la::Gemm_triangle(uplo, orientation_A, orientation_B, alpha, A,
+                                B, beta, C);
+        return;
+      }
+    const int64_t k
+      = orientation_A == El::Orientation::NORMAL ? A.Width() : A.Height();
+    extra.emplace_back("triangle", uplo == El::LOWER ? "lower" : "upper");
+    Scoped_Timer timer(timers, name,
+                       shape_attrs("gemm", C.Height(), C.Width(), k,
+                                   ranks_of(C), std::move(extra)));
+    local_la::Gemm_triangle(uplo, orientation_A, orientation_B, alpha, A, B,
+                            beta, C);
+  }
+
   // C := alpha op(A) op(A)^T + beta C
   template <class TScalar, class TA, class TC>
   void Syrk(Timers &timers, const std::string &name,

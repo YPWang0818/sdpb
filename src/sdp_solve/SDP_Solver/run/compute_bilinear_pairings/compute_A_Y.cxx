@@ -46,11 +46,39 @@ void compute_A_Y(
       auto &block(bases_blocks[index]);
       auto &Y_block(Y.blocks[index]);
 
-      El::DistMatrix<El::BigFloat> Y_Q(block),
-        A_Y_matrix_temp(block.Width(), block.Width(), block.Grid());
+      // gemm1 overwrites Y_Q (beta = 0): no need to copy block into it
+      El::DistMatrix<El::BigFloat> Y_Q(block.Height(), block.Width(),
+                                       block.Grid());
       timed::Gemm(timers, "gemm1", El::Orientation::NORMAL,
                   El::Orientation::NORMAL, El::BigFloat(1), Y_block, block,
                   El::BigFloat(0), Y_Q);
+
+      if(dim == 1)
+        {
+          // The only tile is Transpose(MakeSymmetric(LOWER, block^T Y_Q)).
+          // Computed in place, with the same roundings: the upper triangle
+          // of Y_Q^T block (the same products as the lower triangle of
+          // block^T Y_Q), then the lower := 1 * upper.
+          auto &tiles(A_Y[parity][Q_index]);
+          tiles.resize(1);
+          if(tiles[0].size() != 1 || tiles[0][0].Height() != block.Width()
+             || &tiles[0][0].Grid() != &block.Grid())
+            {
+              tiles[0].clear();
+              tiles[0].emplace_back(block.Width(), block.Width(),
+                                    block.Grid());
+            }
+          auto &tile(tiles[0][0]);
+          timed::Gemm_triangle(timers, "gemm2", El::UpperOrLower::UPPER,
+                               El::Orientation::TRANSPOSE,
+                               El::Orientation::NORMAL, El::BigFloat(1), Y_Q,
+                               block, El::BigFloat(0), tile);
+          local_la::MakeSymmetric(El::UpperOrLower::UPPER, tile);
+          continue;
+        }
+
+      El::DistMatrix<El::BigFloat> A_Y_matrix_temp(block.Width(), block.Width(),
+                                                   block.Grid());
 
       timed::Gemm(timers, "gemm2", El::Orientation::TRANSPOSE,
                   El::Orientation::NORMAL, El::BigFloat(1), block, Y_Q,
@@ -59,7 +87,7 @@ void compute_A_Y(
       auto &A_Y_block(A_Y[parity][Q_index]);
       A_Y_block.resize(dim);
 
-      El::MakeSymmetric(El::UpperOrLower::LOWER, A_Y_matrix_temp);
+      local_la::MakeSymmetric(El::UpperOrLower::LOWER, A_Y_matrix_temp);
 
       std::optional<Scoped_Timer> split_timer;
       if(timers.detail() >= 1)

@@ -69,7 +69,7 @@ void constraint_matrix_weighted_sum(const Block_Info &block_info,
               }
           if(block_info.dimensions[block_index] > 1)
             {
-              El::MakeSymmetric(El::UpperOrLowerNS::UPPER, *result_block);
+              local_la::MakeSymmetric(El::UpperOrLowerNS::UPPER, *result_block);
             }
           ++result_block;
           ++bilinear_bases_block;

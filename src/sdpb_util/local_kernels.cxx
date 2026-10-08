@@ -109,18 +109,19 @@ namespace
             mpf_mul(ptr(c[i + j * ldc]), ptr(c[i + j * ldc]), ptr(beta));
       }
   }
-}
 
-namespace local_kernels
-{
-  void gemm(const El::Orientation orientation_A,
-            const El::Orientation orientation_B, const El::BigFloat &alpha,
-            const Matrix &A, const Matrix &B, const El::BigFloat &beta,
-            Matrix &C)
+  // Elemental's generic Gemm loops for the rows [row_begin(j), row_end(j))
+  // of every column j of C
+  template <class Begin, class End>
+  void gemm_rows(const El::Orientation orientation_A,
+                 const El::Orientation orientation_B,
+                 const El::BigFloat &alpha, const Matrix &A, const Matrix &B,
+                 const El::BigFloat &beta, Matrix &C, const Begin &row_begin,
+                 const End &row_end)
   {
     const bool normal_A = orientation_A == El::NORMAL;
     const bool normal_B = orientation_B == El::NORMAL;
-    const El::Int m = C.Height(), n = C.Width();
+    const El::Int n = C.Width();
     const El::Int k = normal_A ? A.Width() : A.Height();
     const El::Int lda = A.LDim(), ldb = B.LDim(), ldc = C.LDim();
     const El::BigFloat *a = A.LockedBuffer();
@@ -140,7 +141,7 @@ namespace local_kernels
               const El::BigFloat &b_lj
                 = normal_B ? b[l + j * ldb] : b[j + l * ldb];
               mpf_mul(s.gamma, ptr(alpha), ptr(b_lj));
-              for(El::Int i = 0; i < m; ++i)
+              for(El::Int i = row_begin(j); i < row_end(j); ++i)
                 {
                   mpf_mul(s.t, ptr(a[i + l * lda]), s.gamma);
                   mpf_add(ptr(c[i + j * ldc]), ptr(c[i + j * ldc]), s.t);
@@ -151,7 +152,7 @@ namespace local_kernels
       {
         // C(i,j) += alpha (A(:,i) . op(B)(:,j)): a dot product per (i, j)
         for(El::Int j = 0; j < n; ++j)
-          for(El::Int i = 0; i < m; ++i)
+          for(El::Int i = row_begin(j); i < row_end(j); ++i)
             {
               mpf_set_ui(s.gamma, 0);
               for(El::Int l = 0; l < k; ++l)
@@ -165,6 +166,35 @@ namespace local_kernels
               mpf_add(ptr(c[i + j * ldc]), ptr(c[i + j * ldc]), s.gamma);
             }
       }
+  }
+}
+
+namespace local_kernels
+{
+  void gemm(const El::Orientation orientation_A,
+            const El::Orientation orientation_B, const El::BigFloat &alpha,
+            const Matrix &A, const Matrix &B, const El::BigFloat &beta,
+            Matrix &C)
+  {
+    gemm_rows(orientation_A, orientation_B, alpha, A, B, beta, C,
+              [](El::Int) { return El::Int(0); },
+              [&C](El::Int) { return C.Height(); });
+  }
+
+  void gemm_triangle(const El::UpperOrLower uplo,
+                     const El::Orientation orientation_A,
+                     const El::Orientation orientation_B,
+                     const El::BigFloat &alpha, const Matrix &A,
+                     const Matrix &B, const El::BigFloat &beta, Matrix &C)
+  {
+    const El::Int m = C.Height();
+    if(uplo == El::LOWER)
+      gemm_rows(orientation_A, orientation_B, alpha, A, B, beta, C,
+                [](El::Int j) { return j; }, [m](El::Int) { return m; });
+    else
+      gemm_rows(orientation_A, orientation_B, alpha, A, B, beta, C,
+                [](El::Int) { return El::Int(0); },
+                [m](El::Int j) { return std::min(j + 1, m); });
   }
 
   void syrk(const El::UpperOrLower uplo, const El::Orientation orientation,
@@ -343,5 +373,21 @@ namespace local_kernels
             mpf_add(a_ji, s.gamma, s.u);
           }
       }
+  }
+
+  void make_symmetric(const El::UpperOrLower uplo, Matrix &A)
+  {
+    const El::Int n = A.Height(), lda = A.LDim();
+    El::BigFloat *a = A.Buffer();
+    auto &s = scratch();
+    for(El::Int j = 0; j < n; ++j)
+      for(El::Int i = j + 1; i < n; ++i)
+        {
+          // (i, j) is below the diagonal, (j, i) above it
+          if(uplo == El::LOWER)
+            mpf_mul(ptr(a[j + i * lda]), s.one, ptr(a[i + j * lda]));
+          else
+            mpf_mul(ptr(a[i + j * lda]), s.one, ptr(a[j + i * lda]));
+        }
   }
 }

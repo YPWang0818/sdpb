@@ -35,12 +35,37 @@ void compute_A_X_inv(
 
       auto &block(bases_blocks[index]);
       auto &X_cholesky_block(X_cholesky.blocks[index]);
-      El::DistMatrix<El::BigFloat> temp_space(block),
-        A_X_inv_matrix(block.Width(), block.Width(), block.Grid());
+      El::DistMatrix<El::BigFloat> temp_space(block);
       timed::Trsm(timers, "trsm", El::LeftOrRight::LEFT,
                   El::UpperOrLowerNS::LOWER, El::Orientation::NORMAL,
                   El::UnitOrNonUnit::NON_UNIT, El::BigFloat(1),
                   X_cholesky_block, temp_space);
+
+      if(dim == 1)
+        {
+          // The only tile is a copy of the whole symmetric matrix: compute it
+          // in place (reusing the tile of the previous iteration)
+          auto &tiles(A_X_inv[parity][Q_index]);
+          tiles.resize(1);
+          if(tiles[0].size() != 1 || tiles[0][0].Height() != block.Width()
+             || &tiles[0][0].Grid() != &block.Grid())
+            {
+              tiles[0].clear();
+              tiles[0].emplace_back(block.Width(), block.Width(),
+                                    block.Grid());
+              tiles[0][0].Align(0, 0);
+            }
+          auto &tile(tiles[0][0]);
+          El::Zero(tile);
+          timed::Syrk(timers, "syrk", El::UpperOrLowerNS::LOWER,
+                      El::Orientation::TRANSPOSE, El::BigFloat(1), temp_space,
+                      El::BigFloat(0), tile);
+          local_la::MakeSymmetric(El::UpperOrLower::LOWER, tile);
+          continue;
+        }
+
+      El::DistMatrix<El::BigFloat> A_X_inv_matrix(block.Width(), block.Width(),
+                                                  block.Grid());
 
       // We have to set this to zero because the values can be NaN.
       // Multiplying 0*NaN = NaN.
@@ -48,7 +73,7 @@ void compute_A_X_inv(
       timed::Syrk(timers, "syrk", El::UpperOrLowerNS::LOWER,
                   El::Orientation::TRANSPOSE, El::BigFloat(1), temp_space,
                   El::BigFloat(0), A_X_inv_matrix);
-      El::MakeSymmetric(El::UpperOrLower::LOWER, A_X_inv_matrix);
+      local_la::MakeSymmetric(El::UpperOrLower::LOWER, A_X_inv_matrix);
 
       std::optional<Scoped_Timer> split_timer;
       if(timers.detail() >= 1)

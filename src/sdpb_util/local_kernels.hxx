@@ -26,6 +26,15 @@ namespace local_kernels
             const El::BigFloat &alpha, const Matrix &A, const Matrix &B,
             const El::BigFloat &beta, Matrix &C);
 
+  // gemm for a square C that only needs its uplo triangle (with the
+  // diagonal): those entries are computed exactly as gemm computes them,
+  // the other triangle is only scaled by beta. For products that are
+  // symmetrized afterwards (MakeSymmetric overwrites the other triangle).
+  void gemm_triangle(El::UpperOrLower uplo, El::Orientation orientation_A,
+                     El::Orientation orientation_B, const El::BigFloat &alpha,
+                     const Matrix &A, const Matrix &B,
+                     const El::BigFloat &beta, Matrix &C);
+
   // uplo triangle of C := alpha op(A) op(A)^T + beta C (C is first scaled
   // by beta on all of C, as the local El::Syrk does; local_la::Syrk scales
   // only the uplo triangle beforehand and passes beta = 1)
@@ -48,4 +57,10 @@ namespace local_kernels
   // A += Transpose(A)" (Block_Diagonal_Matrix::symmetrize), without the
   // transposed copy and the Axpy temporaries
   void symmetrize(Matrix &A);
+
+  // El::MakeSymmetric(uplo, A) for a DistMatrix A, in place: the other
+  // triangle becomes 1 * (this triangle), i.e. a copy truncated to the
+  // working precision (the distributed version zeroes it and adds the
+  // transpose with El::AxpyTrapezoid).
+  void make_symmetric(El::UpperOrLower uplo, Matrix &A);
 }

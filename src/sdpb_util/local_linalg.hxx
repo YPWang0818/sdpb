@@ -115,6 +115,32 @@ namespace local_la
       El::Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
   }
 
+  // The uplo triangle (with the diagonal) of C := alpha op(A) op(B) + beta C,
+  // for products that are symmetrized afterwards; the other triangle is
+  // unspecified (the distributed fallback computes all of C).
+  template <class TScalar, class TA, class TB, class TC>
+  void Gemm_triangle(const El::UpperOrLower uplo,
+                     const El::Orientation orientation_A,
+                     const El::Orientation orientation_B, const TScalar &alpha,
+                     const TA &A, const TB &B, const TScalar &beta, TC &C)
+  {
+    if(all_local(A, B, C) && own_kernels() && real_orientation(orientation_A)
+       && real_orientation(orientation_B))
+      local_kernels::gemm_triangle(uplo, orientation_A, orientation_B, alpha,
+                                   local(A), local(B), beta, local(C));
+    else
+      Gemm(orientation_A, orientation_B, alpha, A, B, beta, C);
+  }
+
+  // El::MakeSymmetric(uplo, A): the other triangle := 1 * this triangle
+  template <class TA> void MakeSymmetric(const El::UpperOrLower uplo, TA &A)
+  {
+    if(all_local(A) && own_kernels())
+      local_kernels::make_symmetric(uplo, local(A));
+    else
+      El::MakeSymmetric(uplo, A);
+  }
+
   // y := alpha op(A) x + beta y
   template <class TScalar, class TA, class TX, class TY>
   void Gemv(const El::Orientation orientation, const TScalar &alpha,

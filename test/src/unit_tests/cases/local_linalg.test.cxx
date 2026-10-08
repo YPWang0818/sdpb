@@ -386,6 +386,45 @@ TEST_CASE("local_kernels")
       }
   }
 
+  SECTION("gemm_triangle")
+  {
+    for(const auto uplo : {El::LOWER, El::UPPER})
+      for(const auto orientation_A : {El::NORMAL, El::TRANSPOSE})
+        for(const auto orientation_B : {El::NORMAL, El::TRANSPOSE})
+          for(const auto &[n, k] : std::vector<std::array<int, 2>>{{1, 1}, {5, 3}, {10, 5}, {26, 13}})
+            {
+              CAPTURE(uplo, orientation_A, orientation_B, n, k);
+              const Matrix A = orientation_A == El::NORMAL ? full_limb_matrix(n, k)
+                                                           : full_limb_matrix(k, n);
+              const Matrix B = orientation_B == El::NORMAL ? full_limb_matrix(k, n)
+                                                           : full_limb_matrix(n, k);
+              const Matrix C0 = full_limb_matrix(n, n);
+              Matrix C_full = C0, C_triangle = C0;
+              local_kernels::gemm(orientation_A, orientation_B, one, A, B, zero, C_full);
+              local_kernels::gemm_triangle(uplo, orientation_A, orientation_B, one, A, B, zero,
+                                           C_triangle);
+              El::MakeTrapezoidal(uplo, C_full);
+              El::MakeTrapezoidal(uplo, C_triangle);
+              require_bitwise(C_full, C_triangle);
+            }
+  }
+
+  SECTION("make_symmetric")
+  {
+    El::Grid grid(El::mpi::COMM_SELF);
+    for(const auto uplo : {El::LOWER, El::UPPER})
+      for(const int n : {1, 2, 5, 13})
+        {
+          CAPTURE(uplo, n);
+          const Matrix A0 = full_limb_matrix(n, n);
+          auto A_el = to_dist(A0, grid);
+          El::MakeSymmetric(uplo, A_el);
+          Matrix A_own = A0;
+          local_kernels::make_symmetric(uplo, A_own);
+          require_bitwise(A_el.LockedMatrix(), A_own);
+        }
+  }
+
   SECTION("cholesky SolveAfter through local_la")
   {
     El::Grid grid(El::mpi::COMM_SELF);

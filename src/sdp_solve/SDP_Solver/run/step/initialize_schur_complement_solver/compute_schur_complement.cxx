@@ -1,6 +1,7 @@
 #include "sdp_solve/Block_Diagonal_Matrix.hxx"
 #include "sdp_solve/Block_Info.hxx"
 #include "sdpb_util/Timers/Timers.hxx"
+#include "sdpb_util/local_linalg.hxx"
 
 #include <optional>
 
@@ -47,6 +48,41 @@ void compute_schur_complement(
             {"K", std::to_string(block_size)},
             {"S", std::to_string(schur_complement_block->Height())},
             {"ranks", std::to_string(schur_complement_block->Grid().Size())}});
+
+      if(dim == 1 && local_la::own_kernels()
+         && local_la::all_local(*schur_complement_block))
+        {
+          // One tile, the Schur block itself, on one rank: write the
+          // elements straight into it, and only the lower triangle, which
+          // MakeSymmetric(LOWER) copies (truncated) to the upper one. The
+          // operations per element are those of the general code below.
+          auto &S(schur_complement_block->Matrix());
+          for(int64_t column(0); column < S.Width(); ++column)
+            for(int64_t row(column); row < S.Height(); ++row)
+              {
+                element.Zero();
+                for(size_t parity(0); parity < 2; ++parity)
+                  {
+                    const auto &A_X_inv_tile(
+                      A_X_inv[parity][Q_index][0][0].LockedMatrix());
+                    const auto &A_Y_tile(
+                      A_Y[parity][Q_index][0][0].LockedMatrix());
+                    for(int term(0); term < 4; ++term)
+                      {
+                        product = A_X_inv_tile.CRef(row, column);
+                        product *= A_Y_tile.CRef(row, column);
+                        element += product;
+                      }
+                  }
+                element /= 4;
+                S(row, column) = element;
+              }
+          local_la::MakeSymmetric(El::UpperOrLower::LOWER,
+                                  *schur_complement_block);
+          ++schur_complement_block;
+          ++Q_index;
+          continue;
+        }
 
       El::DistMatrix<El::BigFloat> temp(block_size, block_size,
                                         schur_complement_block->Grid()),
@@ -133,7 +169,7 @@ void compute_schur_complement(
             }
         }
 
-      El::MakeSymmetric(El::UpperOrLower::LOWER, *schur_complement_block);
+      local_la::MakeSymmetric(El::UpperOrLower::LOWER, *schur_complement_block);
       ++schur_complement_block;
       ++Q_index;
     }
