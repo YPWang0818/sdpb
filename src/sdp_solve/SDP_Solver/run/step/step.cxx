@@ -26,7 +26,7 @@ void initialize_schur_complement_solver(
 
 void compute_search_direction(
   const Block_Info &block_info, const SDP &sdp, const SDP_Solver &solver,
-  const Block_Diagonal_Matrix &minus_XY,
+  const Block_Diagonal_Matrix &minus_XY, const Block_Diagonal_Matrix &PY,
   const Block_Diagonal_Matrix &schur_complement_cholesky,
   const Block_Matrix &schur_off_diagonal,
   const Block_Diagonal_Matrix &X_cholesky, const El::BigFloat &beta,
@@ -161,6 +161,11 @@ void SDP_Solver::step(
     // R_error = maxAbs(R)
     R_error = compute_R_error(mu, minus_XY, timers);
 
+    // PrimalResidues Y: the same in the predictor and the corrector
+    Block_Diagonal_Matrix PY(X);
+    scale_multiply_add(El::BigFloat(1), primal_residues, Y, El::BigFloat(0),
+                       PY, timers, "PY_product");
+
     {
       Scoped_Timer predictor_timer(timers, "search_direction",
                                    {{"phase", "predictor"}});
@@ -168,7 +173,7 @@ void SDP_Solver::step(
       // Compute the predictor solution for (dx, dX, dy, dY)
       beta_predictor = predictor_centering_parameter(
         parameters, is_primal_and_dual_feasible);
-      compute_search_direction(block_info, sdp, *this, minus_XY,
+      compute_search_direction(block_info, sdp, *this, minus_XY, PY,
                                schur_complement_cholesky, schur_off_diagonal,
                                X_cholesky, beta_predictor, mu,
                                primal_residue_p, false, Q, dx, dX, dy, dY,
@@ -183,7 +188,7 @@ void SDP_Solver::step(
         parameters, X, dX, Y, dY, mu, is_primal_and_dual_feasible,
         total_psd_rows);
 
-      compute_search_direction(block_info, sdp, *this, minus_XY,
+      compute_search_direction(block_info, sdp, *this, minus_XY, PY,
                                schur_complement_cholesky, schur_off_diagonal,
                                X_cholesky, beta_corrector, mu,
                                primal_residue_p, true, Q, dx, dX, dy, dY,
@@ -217,7 +222,7 @@ void SDP_Solver::step(
     // Update the primal point (x, X) += primalStepLength*(dx, dX)
     for(size_t block = 0; block < x.blocks.size(); ++block)
       {
-        El::Axpy(primal_step_length, dx.blocks[block], x.blocks[block]);
+        local_la::Axpy(primal_step_length, dx.blocks[block], x.blocks[block]);
       }
     dX *= primal_step_length;
 
@@ -226,7 +231,7 @@ void SDP_Solver::step(
     // Update the dual point (y, Y) += dualStepLength*(dy, dY)
     for(size_t block = 0; block < dy.blocks.size(); ++block)
       {
-        El::Axpy(dual_step_length, dy.blocks[block], y.blocks[block]);
+        local_la::Axpy(dual_step_length, dy.blocks[block], y.blocks[block]);
       }
     dY *= dual_step_length;
 

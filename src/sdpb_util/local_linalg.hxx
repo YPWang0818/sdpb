@@ -166,6 +166,31 @@ namespace local_la
       El::Trsm(side, uplo, orientation, diag, alpha, A, B);
   }
 
+  // Y := Y + alpha X
+  template <class TScalar, class TX, class TY>
+  void Axpy(const TScalar &alpha, const TX &X, TY &Y)
+  {
+    if(all_local(X, Y) && own_kernels() && X.Height() == Y.Height()
+       && X.Width() == Y.Width())
+      local_kernels::axpy(alpha, local(X), local(Y));
+    else
+      El::Axpy(alpha, X, Y);
+  }
+
+  // A := (A + A^T) / 2 with the roundings of "A *= 0.5; A += Transpose(A)"
+  template <class TA> void symmetrize(TA &A)
+  {
+    if(all_local(A) && own_kernels())
+      {
+        local_kernels::symmetrize(local(A));
+        return;
+      }
+    A *= El::BigFloat(0.5);
+    El::DistMatrix<El::BigFloat> transpose(A.Grid());
+    El::Transpose(A, transpose, false);
+    A += transpose;
+  }
+
   // A := Cholesky factor of A
   template <class TA> void Cholesky(const El::UpperOrLower uplo, TA &A)
   {

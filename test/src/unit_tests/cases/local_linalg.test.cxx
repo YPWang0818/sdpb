@@ -353,6 +353,39 @@ TEST_CASE("local_kernels")
                 }
   }
 
+  SECTION("axpy")
+  {
+    for(const auto &[m, n] : std::vector<std::array<int, 2>>{{1, 1}, {5, 5}, {13, 1}, {7, 20}})
+      for(const auto &alpha : {one, minus_one, third})
+        {
+          CAPTURE(m, n, alpha);
+          const Matrix X = full_limb_matrix(m, n);
+          const Matrix Y0 = full_limb_matrix(m, n);
+          Matrix Y_el = Y0, Y_own = Y0;
+          El::Axpy(alpha, X, Y_el);
+          local_kernels::axpy(alpha, X, Y_own);
+          require_bitwise(Y_el, Y_own);
+        }
+  }
+
+  SECTION("symmetrize")
+  {
+    for(const int n : {1, 2, 5, 13})
+      {
+        CAPTURE(n);
+        const Matrix A0 = full_limb_matrix(n, n);
+        // Block_Diagonal_Matrix::symmetrize before local_la
+        Matrix A_el = A0;
+        A_el *= El::BigFloat(0.5);
+        Matrix transpose;
+        El::Transpose(A_el, transpose, false);
+        A_el += transpose;
+        Matrix A_own = A0;
+        local_kernels::symmetrize(A_own);
+        require_bitwise(A_el, A_own);
+      }
+  }
+
   SECTION("cholesky SolveAfter through local_la")
   {
     El::Grid grid(El::mpi::COMM_SELF);

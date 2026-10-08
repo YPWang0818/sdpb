@@ -39,4 +39,13 @@ namespace local_kernels
             El::Orientation orientation, El::UnitOrNonUnit diag,
             const El::BigFloat &alpha, const Matrix &A, Matrix &B,
             bool reciprocal);
+
+  // Y := Y + alpha X for X, Y of the same shape, as El::Axpy computes it
+  // (Y(i,j) += alpha * X(i,j), whose product is a BigFloat temporary there)
+  void axpy(const El::BigFloat &alpha, const Matrix &X, Matrix &Y);
+
+  // A := (A + A^T) / 2 in place, with the roundings of "A *= 0.5;
+  // A += Transpose(A)" (Block_Diagonal_Matrix::symmetrize), without the
+  // transposed copy and the Axpy temporaries
+  void symmetrize(Matrix &A);
 }

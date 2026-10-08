@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "sdpb_util/local_linalg.hxx"
+
 #include <El.hpp>
 
 #include <list>
@@ -68,19 +70,23 @@ public:
       }
   }
 
+  // As DistMatrix +=/-= (El::Axpy with alpha 1/-1), without temporaries on
+  // one rank
   void operator+=(const Block_Diagonal_Matrix &A)
   {
+    const El::BigFloat one(1);
     for(size_t b = 0; b < blocks.size(); b++)
       {
-        blocks[b] += A.blocks[b];
+        local_la::Axpy(one, A.blocks[b], blocks[b]);
       }
   }
 
   void operator-=(const Block_Diagonal_Matrix &A)
   {
+    const El::BigFloat minus_one(-1);
     for(size_t b = 0; b < blocks.size(); b++)
       {
-        blocks[b] -= A.blocks[b];
+        local_la::Axpy(minus_one, A.blocks[b], blocks[b]);
       }
   }
 
@@ -96,15 +102,11 @@ public:
   {
     for(auto &block : blocks)
       {
-        // FIXME: This feels expensive
-
         // We can not use El::MakeSymmetric() because that just copies
         // the lower part to the upper part.  We need to average the
-        // upper and lower parts.
-        block *= 0.5;
-        El::DistMatrix<El::BigFloat> transpose(block.Grid());
-        El::Transpose(block, transpose, false);
-        block += transpose;
+        // upper and lower parts: block *= 0.5; block += Transpose(block),
+        // in place on one rank (local_la::symmetrize).
+        local_la::symmetrize(block);
       }
   }
 

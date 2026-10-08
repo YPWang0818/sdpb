@@ -9,7 +9,7 @@ namespace
   // Scratch variables at the working precision (one set per thread).
   struct Scratch
   {
-    mpf_t t, gamma;
+    mpf_t t, gamma, u, one, half;
     mp_bitcnt_t bits = 0;
     Scratch() = default;
     Scratch(const Scratch &) = delete;
@@ -17,10 +17,15 @@ namespace
     ~Scratch()
     {
       if(bits != 0)
-        {
-          mpf_clear(t);
-          mpf_clear(gamma);
-        }
+        clear();
+    }
+    void clear()
+    {
+      mpf_clear(t);
+      mpf_clear(gamma);
+      mpf_clear(u);
+      mpf_clear(one);
+      mpf_clear(half);
     }
     // BigFloat() is created at El::gmp::Precision(); so are these.
     void ensure()
@@ -29,12 +34,14 @@ namespace
       if(bits == precision)
         return;
       if(bits != 0)
-        {
-          mpf_clear(t);
-          mpf_clear(gamma);
-        }
+        clear();
       mpf_init2(t, precision);
       mpf_init2(gamma, precision);
+      mpf_init2(u, precision);
+      mpf_init2(one, precision);
+      mpf_init2(half, precision);
+      mpf_set_ui(one, 1);
+      mpf_set_d(half, 0.5);
       bits = precision;
     }
   };
@@ -292,6 +299,48 @@ namespace local_kernels
                   for(El::Int i = 0; i < m; ++i)
                     update(B_(i, j), B_(i, k), lower ? A_(k, j) : A_(j, k));
               }
+          }
+      }
+  }
+
+  void axpy(const El::BigFloat &alpha, const Matrix &X, Matrix &Y)
+  {
+    const El::Int m = X.Height(), n = X.Width();
+    const El::Int ldx = X.LDim(), ldy = Y.LDim();
+    const El::BigFloat *x = X.LockedBuffer();
+    El::BigFloat *y = Y.Buffer();
+    auto &s = scratch();
+    for(El::Int j = 0; j < n; ++j)
+      for(El::Int i = 0; i < m; ++i)
+        {
+          mpf_mul(s.t, ptr(alpha), ptr(x[i + j * ldx]));
+          mpf_add(ptr(y[i + j * ldy]), ptr(y[i + j * ldy]), s.t);
+        }
+  }
+
+  void symmetrize(Matrix &A)
+  {
+    // h = A * 0.5 (El::Scale); A(i,j) = h(i,j) + 1 * h(j,i) (El::Axpy with
+    // alpha 1, whose product truncates h(j,i) to the working precision)
+    const El::Int n = A.Height(), lda = A.LDim();
+    El::BigFloat *a = A.Buffer();
+    auto &s = scratch();
+    for(El::Int j = 0; j < n; ++j)
+      {
+        mpf_ptr a_jj = ptr(a[j + j * lda]);
+        mpf_mul(s.t, a_jj, s.half);
+        mpf_mul(s.u, s.one, s.t);
+        mpf_add(a_jj, s.t, s.u);
+        for(El::Int i = j + 1; i < n; ++i)
+          {
+            mpf_ptr a_ij = ptr(a[i + j * lda]);
+            mpf_ptr a_ji = ptr(a[j + i * lda]);
+            mpf_mul(s.t, a_ij, s.half);
+            mpf_mul(s.gamma, a_ji, s.half);
+            mpf_mul(s.u, s.one, s.gamma);
+            mpf_add(a_ij, s.t, s.u);
+            mpf_mul(s.u, s.one, s.t);
+            mpf_add(a_ji, s.gamma, s.u);
           }
       }
   }

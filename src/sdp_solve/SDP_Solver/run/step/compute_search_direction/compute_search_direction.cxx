@@ -4,6 +4,7 @@
 // corrector phases.
 //
 // Inputs:
+// - PY = PrimalResidues Y (computed once per step)
 // - beta, the centering parameter
 // - mu = Tr(X Y) / X.cols
 // - correctorPhase: boolean indicating whether we're in the corrector
@@ -40,7 +41,7 @@ void solve_schur_complement_equation(
 
 void compute_search_direction(
   const Block_Info &block_info, const SDP &sdp, const SDP_Solver &solver,
-  const Block_Diagonal_Matrix &minus_XY,
+  const Block_Diagonal_Matrix &minus_XY, const Block_Diagonal_Matrix &PY,
   const Block_Diagonal_Matrix &schur_complement_cholesky,
   const Block_Matrix &schur_off_diagonal,
   const Block_Diagonal_Matrix &X_cholesky, const El::BigFloat &beta,
@@ -60,9 +61,7 @@ void compute_search_direction(
   R.add_diagonal(beta * mu);
 
   // Z = Symmetrize(X^{-1} (PrimalResidues Y - R))
-  Block_Diagonal_Matrix Z(solver.X);
-  scale_multiply_add(El::BigFloat(1), solver.primal_residues, solver.Y,
-                     El::BigFloat(0), Z, timers, "PY_product");
+  Block_Diagonal_Matrix Z(PY);
   Z -= R;
   cholesky_solve(X_cholesky, Z, timers, "cholesky_solve_Z");
   Z.symmetrize();
